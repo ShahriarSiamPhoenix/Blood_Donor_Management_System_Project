@@ -42,6 +42,13 @@ import type {
   VerificationRequest,
 } from '../../types/database';
 import { BLOOD_GROUPS } from '../../utils/bloodCompatibility';
+import {
+  canCompleteBloodRequest,
+  formatRequestStatusError,
+  formatRequestStatusLabel,
+  getRequestStatusBadgeClass,
+  validateRequestStatusTransition,
+} from '../../utils/requestStatus';
 
 type AdminTab =
   | 'overview'
@@ -83,35 +90,45 @@ export function AdminDashboard() {
     notes: '',
   });
   const [settingDrafts, setSettingDrafts] = useState<Record<string, string>>({});
+  const [busyRequestIds, setBusyRequestIds] = useState<Record<string, boolean>>({});
+  const [recordingDonation, setRecordingDonation] = useState(false);
+  const [expiringRequests, setExpiringRequests] = useState(false);
 
-  const loadAll = useCallback(async () => {
-    setLoading(true);
-    try {
-      const data = await fetchSuperAdminDashboardData();
-      setUsers(data.users);
-      setRequests(data.requests);
-      setDonations(data.donations);
-      setDepartments(data.departments);
-      setVerifications(data.verifications);
-      setReports(data.reports);
-      setLogs(data.logs);
-      setSettings(data.settings);
-
-      const drafts: Record<string, string> = {};
-      for (const s of data.settings) {
-        drafts[s.key] = JSON.stringify(s.value, null, 2);
+  const loadAll = useCallback(
+    async (silent = false) => {
+      if (!silent) {
+        setLoading(true);
       }
-      setSettingDrafts(drafts);
-    } catch (err) {
-      showToast(
-        'Failed to load admin analytics',
-        'error',
-        err instanceof Error ? err.message : 'Check admin permissions.'
-      );
-    } finally {
-      setLoading(false);
-    }
-  }, [showToast]);
+      try {
+        const data = await fetchSuperAdminDashboardData();
+        setUsers(data.users);
+        setRequests(data.requests);
+        setDonations(data.donations);
+        setDepartments(data.departments);
+        setVerifications(data.verifications);
+        setReports(data.reports);
+        setLogs(data.logs);
+        setSettings(data.settings);
+
+        const drafts: Record<string, string> = {};
+        for (const s of data.settings) {
+          drafts[s.key] = JSON.stringify(s.value, null, 2);
+        }
+        setSettingDrafts(drafts);
+      } catch (err) {
+        showToast(
+          silent ? 'Failed to refresh dashboard' : 'Failed to load admin analytics',
+          'error',
+          err instanceof Error ? err.message : 'Check admin permissions.'
+        );
+      } finally {
+        if (!silent) {
+          setLoading(false);
+        }
+      }
+    },
+    [showToast]
+  );
 
   useEffect(() => {
     loadAll();
@@ -146,8 +163,9 @@ export function AdminDashboard() {
 
     const monthMap: Record<string, number> = {};
     for (const d of donations) {
-      const month = d.donation_date.slice(0, 7);
-      monthMap[month] = (monthMap[month] || 0) + d.units_donated;
+      const month = (d.donation_date || '').slice(0, 7);
+      if (!month) continue;
+      monthMap[month] = (monthMap[month] || 0) + (Number(d.units_donated) || 0);
     }
     const monthlyTrends = Object.entries(monthMap)
       .sort(([a], [b]) => a.localeCompare(b))
@@ -155,10 +173,11 @@ export function AdminDashboard() {
 
     const reqStatusMap: Record<string, number> = {};
     for (const r of requests) {
-      reqStatusMap[r.status] = (reqStatusMap[r.status] || 0) + 1;
+      const key = r.status || 'pending';
+      reqStatusMap[key] = (reqStatusMap[key] || 0) + 1;
     }
     const requestStatusData = Object.entries(reqStatusMap).map(([name, value]) => ({
-      name: name.replace('_', ' '),
+      name: formatRequestStatusLabel(name),
       value,
     }));
 
@@ -210,16 +229,20 @@ export function AdminDashboard() {
 
   const handleRecordDonation = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (recordingDonation) return;
     if (!user || !donationForm.donorId) {
       showToast('Select a donor', 'error');
       return;
     }
+    setRecordingDonation(true);
     try {
       await adminRecordDonation({ ...donationForm, verifiedBy: user.id });
       showToast('Donation Recorded', 'success', 'Donor totals and last donation date updated.');
-      await loadAll();
+      await loadAll(true);
     } catch (err) {
       showToast('Failed', 'error', err instanceof Error ? err.message : 'Check inputs.');
+    } finally {
+      setRecordingDonation(false);
     }
   };
 
@@ -230,19 +253,23 @@ export function AdminDashboard() {
       await adminCreateDepartment({ ...newDept, actorId: user.id });
       setNewDept({ code: '', name: '', nameBn: '' });
       showToast('Department Added', 'success');
-      await loadAll();
+      await loadAll(true);
     } catch (err) {
       showToast('Error', 'error', err instanceof Error ? err.message : 'Could not add department.');
     }
   };
 
   const handleExpirePastDue = async () => {
+    if (expiringRequests) return;
+    setExpiringRequests(true);
     try {
       const count = await adminRunExpirePastDue();
       showToast('Expiration Sweep Completed', 'info', `${count} past-due requests marked expired.`);
-      await loadAll();
+      await loadAll(true);
     } catch (err) {
       showToast('Error', 'error', err instanceof Error ? err.message : 'Sweep failed.');
+    } finally {
+      setExpiringRequests(false);
     }
   };
 
@@ -283,16 +310,58 @@ export function AdminDashboard() {
     requestId: string,
     nextStatus: Exclude<RequestStatus, 'pending'>
   ) => {
+    if (busyRequestIds[requestId]) return;
+
+    const currentRequest = requests.find((item) => item.id === requestId);
+    if (currentRequest) {
+      const check = validateRequestStatusTransition(currentRequest.status, nextStatus);
+      if (!check.valid) {
+        showToast(
+          'Action Not Allowed',
+          'error',
+          check.reason || 'This blood request cannot be updated to that status.'
+        );
+        return;
+      }
+    }
+
+    setBusyRequestIds((prev) => ({ ...prev, [requestId]: true }));
     try {
       await moderateBloodRequestStatus(requestId, nextStatus);
-      showToast(`Blood request marked ${nextStatus.replace('_', ' ')}`, 'success');
-      await loadAll();
+      const nowIso = new Date().toISOString();
+      setRequests((prev) =>
+        prev.map((item) =>
+          item.id === requestId
+            ? {
+                ...item,
+                status: nextStatus,
+                verified_by: nextStatus === 'verified' ? user?.id ?? item.verified_by : item.verified_by,
+                verified_at: nextStatus === 'verified' ? nowIso : item.verified_at,
+                updated_at: nowIso,
+              }
+            : item
+        )
+      );
+      showToast(
+        nextStatus === 'completed' ? 'Donation Completed' : 'Blood Request Updated',
+        'success',
+        nextStatus === 'completed'
+          ? 'The blood donation request has been marked as completed.'
+          : `Request status updated to ${formatRequestStatusLabel(nextStatus)}.`
+      );
+      await loadAll(true);
     } catch (err) {
       showToast(
         'Request Update Failed',
         'error',
-        err instanceof Error ? err.message : 'Unable to update blood request status.'
+        formatRequestStatusError(err)
       );
+    } finally {
+      setBusyRequestIds((prev) => {
+        const next = { ...prev };
+        delete next[requestId];
+        return next;
+      });
     }
   };
 
@@ -339,10 +408,11 @@ export function AdminDashboard() {
         <button
           type="button"
           onClick={handleExpirePastDue}
-          className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2 text-xs font-semibold text-slate-800 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
+          disabled={expiringRequests}
+          className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2 text-xs font-semibold text-slate-800 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
         >
           <Clock className="h-4 w-4 text-[#C62828]" />
-          Expire Past-Due Requests
+          {expiringRequests ? 'Expiring...' : 'Expire Past-Due Requests'}
         </button>
       </div>
 
@@ -620,42 +690,67 @@ export function AdminDashboard() {
 
         {tab === 'requests' && (
           <div className="space-y-3">
-            {requests.map((r) => (
-              <div
-                key={r.id}
-                className="flex flex-col justify-between gap-3 rounded-xl border border-slate-200 bg-white p-4 sm:flex-row sm:items-center dark:border-slate-800 dark:bg-slate-900"
-              >
-                <div>
-                  <p className="text-xs text-slate-500">
-                    <span className="capitalize font-semibold">{r.status.replace('_', ' ')}</span> ·{' '}
-                    {r.required_blood_group} · {r.bags_needed} bags · {r.required_date}
-                  </p>
-                  <p className="mt-1 text-sm font-bold text-slate-900 dark:text-white">
-                    {r.patient_name} — {r.hospital_name}
-                  </p>
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  {r.status === 'pending' && (
-                    <button
-                      type="button"
-                      onClick={() => handleModerateRequest(r.id, 'verified')}
-                      className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700"
-                    >
-                      Verify
-                    </button>
-                  )}
-                  {(r.status === 'verified' || r.status === 'donor_found') && (
-                    <button
-                      type="button"
-                      onClick={() => handleModerateRequest(r.id, 'completed')}
-                      className="rounded-lg bg-[#C62828] px-3 py-1.5 text-xs font-semibold text-white hover:bg-[#B71C1C]"
-                    >
-                      Complete
-                    </button>
-                  )}
-                </div>
+            {requests.length === 0 ? (
+              <div className="rounded-xl border border-slate-200 bg-white p-8 text-center text-sm text-slate-500 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-400">
+                No blood donation requests found.
               </div>
-            ))}
+            ) : (
+              requests.map((r) => {
+                const isBusy = Boolean(busyRequestIds[r.id]);
+                return (
+                  <div
+                    key={r.id}
+                    className="flex flex-col justify-between gap-3 rounded-xl border border-slate-200 bg-white p-4 sm:flex-row sm:items-center dark:border-slate-800 dark:bg-slate-900"
+                  >
+                    <div>
+                      <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
+                        <span
+                          className={`inline-flex items-center rounded border px-2 py-0.5 font-semibold ${getRequestStatusBadgeClass(
+                            r.status
+                          )}`}
+                        >
+                          {formatRequestStatusLabel(r.status)}
+                        </span>
+                        <span>·</span>
+                        <span>
+                          {r.required_blood_group} · {r.bags_needed} bags · {r.required_date}
+                        </span>
+                      </div>
+                      <p className="mt-1.5 text-sm font-bold text-slate-900 dark:text-white">
+                        {r.patient_name} — {r.hospital_name}
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      {r.status === 'pending' && (
+                        <button
+                          type="button"
+                          disabled={isBusy}
+                          onClick={() => handleModerateRequest(r.id, 'verified')}
+                          className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          {isBusy ? 'Updating...' : 'Verify'}
+                        </button>
+                      )}
+                      {canCompleteBloodRequest(r.status) && (
+                        <button
+                          type="button"
+                          disabled={isBusy}
+                          onClick={() => handleModerateRequest(r.id, 'completed')}
+                          className="rounded-lg bg-[#C62828] px-3 py-1.5 text-xs font-semibold text-white hover:bg-[#B71C1C] disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          {isBusy ? 'Completing...' : 'Donation Complete'}
+                        </button>
+                      )}
+                      {r.status === 'completed' && (
+                        <span className="inline-flex items-center rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-950/40 dark:text-emerald-300">
+                          Completed
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                );
+              })
+            )}
           </div>
         )}
 
@@ -734,9 +829,10 @@ export function AdminDashboard() {
               </div>
               <button
                 type="submit"
-                className="w-full rounded-lg bg-[#C62828] px-4 py-2.5 text-sm font-semibold text-white hover:bg-[#B71C1C]"
+                disabled={recordingDonation}
+                className="w-full rounded-lg bg-[#C62828] px-4 py-2.5 text-sm font-semibold text-white hover:bg-[#B71C1C] disabled:cursor-not-allowed disabled:opacity-60"
               >
-                Record Donation
+                {recordingDonation ? 'Recording...' : 'Record Donation'}
               </button>
             </form>
 

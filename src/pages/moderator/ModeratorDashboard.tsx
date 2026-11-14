@@ -15,6 +15,13 @@ import type {
   RequestStatus,
   VerificationRequest,
 } from '../../types/database';
+import {
+  canCompleteBloodRequest,
+  formatRequestStatusError,
+  formatRequestStatusLabel,
+  getRequestStatusBadgeClass,
+  validateRequestStatusTransition,
+} from '../../utils/requestStatus';
 
 type ModTab = 'verifications' | 'requests' | 'reports' | 'logs';
 
@@ -29,25 +36,33 @@ export function ModeratorDashboard() {
   const [reports, setReports] = useState<ReportItem[]>([]);
   const [logs, setLogs] = useState<AdminLogItem[]>([]);
   const [notesMap, setNotesMap] = useState<Record<string, string>>({});
+  const [busyRequestIds, setBusyRequestIds] = useState<Record<string, boolean>>({});
 
-  const loadData = useCallback(async () => {
-    setLoading(true);
-    try {
-      const ws = await fetchModeratorWorkspace();
-      setVerifications(ws.verifications);
-      setRequests(ws.requests);
-      setReports(ws.reports);
-      setLogs(ws.logs);
-    } catch (err) {
-      showToast(
-        'Failed to load moderator queue',
-        'error',
-        err instanceof Error ? err.message : 'Check permissions.'
-      );
-    } finally {
-      setLoading(false);
-    }
-  }, [showToast]);
+  const loadData = useCallback(
+    async (silent = false) => {
+      if (!silent) {
+        setLoading(true);
+      }
+      try {
+        const ws = await fetchModeratorWorkspace();
+        setVerifications(ws.verifications);
+        setRequests(ws.requests);
+        setReports(ws.reports);
+        setLogs(ws.logs);
+      } catch (err) {
+        showToast(
+          silent ? 'Failed to refresh moderator queue' : 'Failed to load moderator queue',
+          'error',
+          err instanceof Error ? err.message : 'Check permissions.'
+        );
+      } finally {
+        if (!silent) {
+          setLoading(false);
+        }
+      }
+    },
+    [showToast]
+  );
 
   useEffect(() => {
     loadData();
@@ -57,7 +72,7 @@ export function ModeratorDashboard() {
     try {
       await reviewVerificationRequest(id, decision, notesMap[id]);
       showToast(`Donor verification ${decision}`, 'success');
-      await loadData();
+      await loadData(true);
     } catch (err) {
       showToast('Action Failed', 'error', err instanceof Error ? err.message : 'Error');
     }
@@ -67,12 +82,52 @@ export function ModeratorDashboard() {
     id: string,
     nextStatus: Exclude<RequestStatus, 'pending'>
   ) => {
+    if (busyRequestIds[id]) return;
+
+    const current = requests.find((item) => item.id === id);
+    if (current) {
+      const check = validateRequestStatusTransition(current.status, nextStatus);
+      if (!check.valid) {
+        showToast(
+          'Action Not Allowed',
+          'error',
+          check.reason || 'This blood request cannot be updated to that status.'
+        );
+        return;
+      }
+    }
+
+    setBusyRequestIds((prev) => ({ ...prev, [id]: true }));
     try {
       await moderateBloodRequestStatus(id, nextStatus, notesMap[id]);
-      showToast(`Blood request updated to ${nextStatus.replace('_', ' ')}`, 'success');
-      await loadData();
+      const nowIso = new Date().toISOString();
+      setRequests((prev) =>
+        prev.map((item) =>
+          item.id === id
+            ? {
+                ...item,
+                status: nextStatus,
+                verified_by: nextStatus === 'verified' ? user?.id ?? item.verified_by : item.verified_by,
+                verified_at: nextStatus === 'verified' ? nowIso : item.verified_at,
+                updated_at: nowIso,
+              }
+            : item
+        )
+      );
+      showToast(
+        nextStatus === 'completed' ? 'Donation Completed' : 'Blood Request Updated',
+        'success',
+        `Blood request marked ${formatRequestStatusLabel(nextStatus)}.`
+      );
+      await loadData(true);
     } catch (err) {
-      showToast('Action Failed', 'error', err instanceof Error ? err.message : 'Error');
+      showToast('Action Failed', 'error', formatRequestStatusError(err));
+    } finally {
+      setBusyRequestIds((prev) => {
+        const next = { ...prev };
+        delete next[id];
+        return next;
+      });
     }
   };
 
@@ -232,66 +287,95 @@ export function ModeratorDashboard() {
           </div>
         ) : tab === 'requests' ? (
           <div className="space-y-4">
-            {requests.map((r) => (
-              <div
-                key={r.id}
-                className="rounded-xl border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900"
-              >
-                <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-center">
-                  <div>
-                    <p className="text-xs text-slate-500">
-                      <span className="capitalize font-semibold">{r.status.replace('_', ' ')}</span>{' '}
-                      · {r.required_blood_group} · {r.bags_needed} bags · {r.required_date}
-                    </p>
-                    <h3 className="mt-1 text-base font-bold text-slate-900 dark:text-white">
-                      {r.patient_name} — {r.hospital_name}
-                    </h3>
-                    <p className="mt-1 text-xs text-slate-600 dark:text-slate-400">
-                      Contact: {r.contact_person} ({r.contact_phone})
-                    </p>
-                  </div>
-
-                  <div className="flex flex-wrap items-center gap-2">
-                    {r.status === 'pending' && (
-                      <button
-                        type="button"
-                        onClick={() => handleModerateRequest(r.id, 'verified')}
-                        className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700"
-                      >
-                        Verify Request
-                      </button>
-                    )}
-                    {r.status === 'verified' && (
-                      <button
-                        type="button"
-                        onClick={() => handleModerateRequest(r.id, 'donor_found')}
-                        className="rounded-lg bg-slate-900 px-3 py-1.5 text-xs font-semibold text-white dark:bg-slate-700"
-                      >
-                        Mark Donor Found
-                      </button>
-                    )}
-                    {(r.status === 'verified' || r.status === 'donor_found') && (
-                      <button
-                        type="button"
-                        onClick={() => handleModerateRequest(r.id, 'completed')}
-                        className="rounded-lg bg-[#C62828] px-3 py-1.5 text-xs font-semibold text-white"
-                      >
-                        Mark Completed
-                      </button>
-                    )}
-                    {r.status !== 'cancelled' && r.status !== 'completed' && (
-                      <button
-                        type="button"
-                        onClick={() => handleModerateRequest(r.id, 'cancelled')}
-                        className="rounded-lg border border-red-300 px-3 py-1.5 text-xs font-semibold text-[#C62828] dark:border-red-900 dark:text-red-400"
-                      >
-                        Reject / Cancel
-                      </button>
-                    )}
-                  </div>
-                </div>
+            {requests.length === 0 ? (
+              <div className="rounded-xl border border-slate-200 bg-white p-8 text-center text-sm text-slate-500 dark:border-slate-800 dark:bg-slate-900">
+                No blood requests found.
               </div>
-            ))}
+            ) : (
+              requests.map((r) => {
+                const isBusy = Boolean(busyRequestIds[r.id]);
+                return (
+                  <div
+                    key={r.id}
+                    className="rounded-xl border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900"
+                  >
+                    <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-center">
+                      <div>
+                        <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
+                          <span
+                            className={`inline-flex items-center rounded border px-2 py-0.5 font-semibold ${getRequestStatusBadgeClass(
+                              r.status
+                            )}`}
+                          >
+                            {formatRequestStatusLabel(r.status)}
+                          </span>
+                          <span>·</span>
+                          <span>
+                            {r.required_blood_group} · {r.bags_needed} bags · {r.required_date}
+                          </span>
+                        </div>
+                        <h3 className="mt-1.5 text-base font-bold text-slate-900 dark:text-white">
+                          {r.patient_name} — {r.hospital_name}
+                        </h3>
+                        <p className="mt-1 text-xs text-slate-600 dark:text-slate-400">
+                          Contact: {r.contact_person} ({r.contact_phone})
+                        </p>
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-2">
+                        {r.status === 'pending' && (
+                          <button
+                            type="button"
+                            disabled={isBusy}
+                            onClick={() => handleModerateRequest(r.id, 'verified')}
+                            className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
+                          >
+                            {isBusy ? 'Updating...' : 'Verify Request'}
+                          </button>
+                        )}
+                        {r.status === 'verified' && (
+                          <button
+                            type="button"
+                            disabled={isBusy}
+                            onClick={() => handleModerateRequest(r.id, 'donor_found')}
+                            className="rounded-lg bg-slate-900 px-3 py-1.5 text-xs font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60 dark:bg-slate-700"
+                          >
+                            Mark Donor Found
+                          </button>
+                        )}
+                        {canCompleteBloodRequest(r.status) && (
+                          <button
+                            type="button"
+                            disabled={isBusy}
+                            onClick={() => handleModerateRequest(r.id, 'completed')}
+                            className="rounded-lg bg-[#C62828] px-3 py-1.5 text-xs font-semibold text-white hover:bg-[#B71C1C] disabled:cursor-not-allowed disabled:opacity-60"
+                          >
+                            {isBusy ? 'Completing...' : 'Donation Complete'}
+                          </button>
+                        )}
+                        {r.status === 'completed' && (
+                          <span className="inline-flex items-center rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-950/40 dark:text-emerald-300">
+                            Completed
+                          </span>
+                        )}
+                        {r.status !== 'cancelled' &&
+                          r.status !== 'completed' &&
+                          r.status !== 'expired' && (
+                            <button
+                              type="button"
+                              disabled={isBusy}
+                              onClick={() => handleModerateRequest(r.id, 'cancelled')}
+                              className="rounded-lg border border-red-300 px-3 py-1.5 text-xs font-semibold text-[#C62828] disabled:cursor-not-allowed disabled:opacity-60 dark:border-red-900 dark:text-red-400"
+                            >
+                              Reject / Cancel
+                            </button>
+                          )}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })
+            )}
           </div>
         ) : tab === 'reports' ? (
           <div className="space-y-4">

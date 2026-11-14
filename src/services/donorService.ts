@@ -31,8 +31,8 @@ export async function fetchMyDonorWorkspace(userId: string): Promise<{
         .from('profiles')
         .select('*, department:departments(*)')
         .eq('id', userId)
-        .single(),
-      client.from('donor_details').select('*').eq('user_id', userId).single(),
+        .maybeSingle(),
+      client.from('donor_details').select('*').eq('user_id', userId).maybeSingle(),
       client
         .from('donation_history')
         .select('*')
@@ -55,9 +55,20 @@ export async function fetchMyDonorWorkspace(userId: string): Promise<{
         .order('created_at', { ascending: false }),
     ]);
 
+  const firstErr =
+    profileRes.error ||
+    donorRes.error ||
+    donationsRes.error ||
+    incomingRes.error ||
+    outgoingRes.error ||
+    verifyRes.error;
+  if (firstErr) {
+    throw new Error(firstErr.message || 'Unable to load donor workspace.');
+  }
+
   return {
-    profile: (profileRes.data as Profile) || null,
-    donorDetails: (donorRes.data as DonorDetails) || null,
+    profile: (profileRes.data as Profile | null) || null,
+    donorDetails: (donorRes.data as DonorDetails | null) || null,
     donations: (donationsRes.data as DonationHistory[]) || [],
     incomingContacts: (incomingRes.data as unknown as ContactRequest[]) || [],
     outgoingContacts: (outgoingRes.data as unknown as ContactRequest[]) || [],

@@ -3,6 +3,8 @@ import { Link } from 'react-router-dom';
 import {
   AlertCircle,
   Calendar,
+  ChevronLeft,
+  ChevronRight,
   Flag,
   Hospital,
   Lock,
@@ -17,6 +19,7 @@ import { submitAbuseReport } from '../../services/donorService';
 import { fetchPublicBloodRequests } from '../../services/publicService';
 import type { PublicBloodRequest } from '../../types/database';
 import { BLOOD_GROUPS } from '../../utils/bloodCompatibility';
+import { formatRequestStatusLabel, getRequestStatusBadgeClass } from '../../utils/requestStatus';
 
 const STATUS_OPTIONS = [
   { value: '', label: 'All Verified Requests' },
@@ -39,6 +42,7 @@ export function BloodRequestsPage() {
   const [requests, setRequests] = useState<PublicBloodRequest[]>([]);
   const [totalCount, setTotalCount] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [activeRequest, setActiveRequest] = useState<PublicBloodRequest | null>(null);
   const [reportTarget, setReportTarget] = useState<PublicBloodRequest | null>(null);
   const [reportReason, setReportReason] = useState('Suspicious or inaccurate hospital details');
@@ -49,17 +53,25 @@ export function BloodRequestsPage() {
     let active = true;
     async function load() {
       setLoading(true);
-      const res = await fetchPublicBloodRequests({
-        bloodGroup,
-        location,
-        status,
-        page,
-        pageSize: 12,
-      });
-      if (!active) return;
-      setRequests(res.requests);
-      setTotalCount(res.totalCount);
-      setLoading(false);
+      setError(null);
+      try {
+        const res = await fetchPublicBloodRequests({
+          bloodGroup,
+          location,
+          status,
+          page,
+          pageSize: 12,
+        });
+        if (!active) return;
+        setRequests(res.requests);
+        setTotalCount(res.totalCount);
+        setError(res.error);
+      } catch (err) {
+        if (!active) return;
+        setError(err instanceof Error ? err.message : 'Unable to load blood requests.');
+      } finally {
+        if (active) setLoading(false);
+      }
     }
     load();
     return () => {
@@ -191,6 +203,12 @@ export function BloodRequestsPage() {
       </p>
 
       <div className="mt-4">
+        {error && (
+          <div className="mb-4 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800 dark:border-red-900/60 dark:bg-red-950/40 dark:text-red-200">
+            Error loading blood requests: {error}
+          </div>
+        )}
+
         {loading ? (
           <CardGridSkeleton count={4} />
         ) : requests.length === 0 ? (
@@ -213,7 +231,7 @@ export function BloodRequestsPage() {
               <article
                 key={req.id}
                 className={`rounded-xl border p-5 transition-colors ${
-                  req.is_emergency
+                  req.is_emergency && req.status !== 'completed'
                     ? 'border-red-300 bg-red-50/40 dark:border-red-900/70 dark:bg-red-950/20'
                     : 'border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900'
                 }`}
@@ -221,14 +239,20 @@ export function BloodRequestsPage() {
                 <div className="flex items-start justify-between gap-4">
                   <div>
                     <div className="flex flex-wrap items-center gap-2 text-xs text-slate-600 dark:text-slate-400">
-                      {req.is_emergency && (
+                      {req.is_emergency && req.status !== 'completed' && (
                         <span className="inline-flex items-center gap-1 font-bold text-[#C62828] dark:text-red-400">
                           <AlertCircle className="h-3.5 w-3.5" />
                           Emergency
                         </span>
                       )}
-                      {req.is_emergency && <span aria-hidden="true">·</span>}
-                      <span className="capitalize font-semibold">{req.status.replace('_', ' ')}</span>
+                      {req.is_emergency && req.status !== 'completed' && <span aria-hidden="true">·</span>}
+                      <span
+                        className={`inline-flex items-center rounded border px-1.5 py-0.5 text-[11px] font-semibold ${getRequestStatusBadgeClass(
+                          req.status
+                        )}`}
+                      >
+                        {formatRequestStatusLabel(req.status)}
+                      </span>
                       <span aria-hidden="true">·</span>
                       <span className="font-mono-tabular">
                         {req.bags_needed} {req.bags_needed === 1 ? 'bag' : 'bags'}
@@ -311,6 +335,32 @@ export function BloodRequestsPage() {
             ))}
           </div>
         )}
+
+        {totalCount > 12 && (
+          <div className="mt-8 flex items-center justify-center gap-3">
+            <button
+              type="button"
+              disabled={page <= 1}
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              className="inline-flex items-center gap-1 rounded-lg border border-slate-300 bg-white px-3.5 py-2 text-sm font-medium text-slate-700 disabled:opacity-40 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"
+            >
+              <ChevronLeft className="h-4 w-4" />
+              Previous
+            </button>
+            <span className="font-mono-tabular text-xs font-semibold text-slate-600 dark:text-slate-300">
+              Page {page} / {Math.max(1, Math.ceil(totalCount / 12))}
+            </span>
+            <button
+              type="button"
+              disabled={page >= Math.max(1, Math.ceil(totalCount / 12))}
+              onClick={() => setPage((p) => p + 1)}
+              className="inline-flex items-center gap-1 rounded-lg border border-slate-300 bg-white px-3.5 py-2 text-sm font-medium text-slate-700 disabled:opacity-40 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"
+            >
+              Next
+              <ChevronRight className="h-4 w-4" />
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Details Modal */}
@@ -345,6 +395,18 @@ export function BloodRequestsPage() {
             </div>
 
             <dl className="mt-4 space-y-2.5 text-sm">
+              <div className="flex justify-between gap-4 border-b border-slate-100 pb-2 dark:border-slate-800">
+                <dt className="text-slate-500 dark:text-slate-400">Status</dt>
+                <dd>
+                  <span
+                    className={`inline-flex items-center rounded border px-2 py-0.5 text-xs font-semibold ${getRequestStatusBadgeClass(
+                      activeRequest.status
+                    )}`}
+                  >
+                    {formatRequestStatusLabel(activeRequest.status)}
+                  </span>
+                </dd>
+              </div>
               <div className="flex justify-between gap-4 border-b border-slate-100 pb-2 dark:border-slate-800">
                 <dt className="text-slate-500 dark:text-slate-400">Patient</dt>
                 <dd className="font-semibold text-slate-900 dark:text-white">

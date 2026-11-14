@@ -12,6 +12,7 @@ import type {
   UserRole,
   VerificationRequest,
 } from '../types/database';
+import { formatRequestStatusError } from '../utils/requestStatus';
 
 function assertSupabase() {
   if (!isSupabaseConfigured || !supabase) {
@@ -97,6 +98,11 @@ export async function fetchModeratorWorkspace(): Promise<{
       .limit(40),
   ]);
 
+  const firstError = verRes.error || reqRes.error || repRes.error || logRes.error;
+  if (firstError) {
+    throw new Error(firstError.message || 'Unable to load moderator workspace data.');
+  }
+
   return {
     verifications: (verRes.data as unknown as VerificationRequest[]) || [],
     requests: (reqRes.data as BloodRequest[]) || [],
@@ -125,12 +131,15 @@ export async function moderateBloodRequestStatus(
   notes?: string
 ) {
   const client = assertSupabase();
+  await assertDatabaseRole(['moderator', 'super_admin']);
   const { error } = await client.rpc('moderate_blood_request', {
     p_request_id: requestId,
     p_new_status: newStatus,
-    p_notes: notes || null,
+    p_notes: notes?.trim() || null,
   });
-  if (error) throw error;
+  if (error) {
+    throw new Error(formatRequestStatusError(error));
+  }
 }
 
 export async function resolveReport(
@@ -192,6 +201,20 @@ export async function fetchSuperAdminDashboardData() {
       .limit(100),
     client.from('platform_settings').select('*').order('key', { ascending: true }),
   ]);
+
+  const firstError =
+    usersRes.error ||
+    requestsRes.error ||
+    donationsRes.error ||
+    departmentsRes.error ||
+    verificationsRes.error ||
+    reportsRes.error ||
+    logsRes.error ||
+    settingsRes.error;
+
+  if (firstError) {
+    throw new Error(firstError.message || 'Unable to load admin dashboard data.');
+  }
 
   const rawUsers = (usersRes.data || []) as Array<
     Profile & { donor_details: DonorDetails | DonorDetails[] | null }

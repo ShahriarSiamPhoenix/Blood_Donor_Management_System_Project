@@ -37,6 +37,7 @@ import type {
 } from '../../types/database';
 import { BLOOD_GROUPS } from '../../utils/bloodCompatibility';
 import { formatDepartmentLabel } from '../../utils/departments';
+import { formatRequestStatusLabel, getRequestStatusBadgeClass } from '../../utils/requestStatus';
 import { computeProfileCompletion } from '../../utils/validation';
 
 type TabKey = 'profile' | 'requests' | 'contacts' | 'donations';
@@ -677,9 +678,17 @@ export function StudentDashboard() {
                       <p className="text-sm font-bold text-slate-900 dark:text-white">
                         {req.patient_name} · {req.required_blood_group} ({req.bags_needed} bags)
                       </p>
-                      <p className="text-xs text-slate-500 dark:text-slate-400">
-                        {req.hospital_name} · Needed {req.required_date} · Status:{' '}
-                        <span className="capitalize font-semibold">{req.status.replace('_', ' ')}</span>
+                      <p className="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
+                        <span>
+                          {req.hospital_name} · Needed {req.required_date}
+                        </span>
+                        <span
+                          className={`inline-flex items-center rounded border px-2 py-0.5 text-[11px] font-semibold ${getRequestStatusBadgeClass(
+                            req.status
+                          )}`}
+                        >
+                          {formatRequestStatusLabel(req.status)}
+                        </span>
                       </p>
                     </div>
                     {(req.status === 'pending' || req.status === 'verified') && (

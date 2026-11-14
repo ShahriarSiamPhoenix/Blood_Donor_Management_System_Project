@@ -16,22 +16,31 @@ export function NotificationBell() {
   const [items, setItems] = useState<NotificationItem[]>([]);
   const containerRef = useRef<HTMLDivElement>(null);
 
+  const userId = user?.id;
+
   useEffect(() => {
-    if (!user || !isConfigured) {
+    if (!userId || !isConfigured) {
       setItems([]);
       return;
     }
 
-    fetchNotifications(user.id)
-      .then(setItems)
+    let mounted = true;
+    fetchNotifications(userId)
+      .then((rows) => {
+        if (mounted) setItems(rows);
+      })
       .catch(() => undefined);
 
-    const unsubscribe = subscribeToNotifications(user.id, (incoming) => {
-      setItems((prev) => [incoming, ...prev]);
+    const unsubscribe = subscribeToNotifications(userId, (incoming) => {
+      if (!mounted) return;
+      setItems((prev) => (prev.some((n) => n.id === incoming.id) ? prev : [incoming, ...prev]));
     });
 
-    return unsubscribe;
-  }, [user, isConfigured]);
+    return () => {
+      mounted = false;
+      unsubscribe();
+    };
+  }, [userId, isConfigured]);
 
   useEffect(() => {
     const onClickOutside = (event: MouseEvent) => {

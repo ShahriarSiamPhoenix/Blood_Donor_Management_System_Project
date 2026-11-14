@@ -42,8 +42,10 @@ export function subscribeToNotifications(
   }
 
   const client = supabase;
+  let active = true;
+  const topic = `notifications:${userId}:${Math.random().toString(36).slice(2, 8)}`;
   const channel = client
-    .channel(`notifications:${userId}`)
+    .channel(topic)
     .on(
       'postgres_changes',
       {
@@ -53,7 +55,7 @@ export function subscribeToNotifications(
         filter: `user_id=eq.${userId}`,
       },
       (payload) => {
-        if (payload.new) {
+        if (active && payload.new) {
           onInsert(payload.new as NotificationItem);
         }
       }
@@ -61,6 +63,7 @@ export function subscribeToNotifications(
     .subscribe();
 
   return () => {
-    client.removeChannel(channel);
+    active = false;
+    void client.removeChannel(channel);
   };
 }

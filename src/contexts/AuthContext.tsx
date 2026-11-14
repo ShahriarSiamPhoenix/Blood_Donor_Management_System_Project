@@ -41,13 +41,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const loadUserRecords = useCallback(async (userId: string) => {
     if (!supabase) return;
-    const [profileRes, donorRes] = await Promise.all([
-      supabase.from('profiles').select('*, department:departments(*)').eq('id', userId).maybeSingle(),
-      supabase.from('donor_details').select('*').eq('user_id', userId).maybeSingle(),
-    ]);
+    try {
+      const [profileRes, donorRes] = await Promise.all([
+        supabase.from('profiles').select('*, department:departments(*)').eq('id', userId).maybeSingle(),
+        supabase.from('donor_details').select('*').eq('user_id', userId).maybeSingle(),
+      ]);
 
-    setProfile((profileRes.data as Profile | null) ?? null);
-    setDonorDetails((donorRes.data as DonorDetails | null) ?? null);
+      if (!profileRes.error) {
+        setProfile((profileRes.data as Profile | null) ?? null);
+      }
+      if (!donorRes.error) {
+        setDonorDetails((donorRes.data as DonorDetails | null) ?? null);
+      }
+    } catch {
+      // Preserve existing state on transient network failure
+    }
   }, []);
 
   const refreshProfile = useCallback(async () => {
@@ -63,33 +71,62 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
 
     let mounted = true;
+    let initialLoadedUserId: string | null = null;
+    let pendingTimer: number | null = null;
 
-    supabase.auth.getSession().then(async ({ data }) => {
-      if (!mounted) return;
-      const currentSession = data.session ?? null;
-      setSession(currentSession);
-      setUser(currentSession?.user ?? null);
-      if (currentSession?.user) {
-        await loadUserRecords(currentSession.user.id);
-      }
-      setLoading(false);
-    });
+    supabase.auth
+      .getSession()
+      .then(async ({ data }) => {
+        if (!mounted) return;
+        const currentSession = data.session ?? null;
+        setSession(currentSession);
+        setUser(currentSession?.user ?? null);
+        if (currentSession?.user) {
+          initialLoadedUserId = currentSession.user.id;
+          await loadUserRecords(currentSession.user.id);
+        }
+        if (mounted) setLoading(false);
+      })
+      .catch(() => {
+        if (mounted) setLoading(false);
+      });
 
-    const { data: listener } = supabase.auth.onAuthStateChange(async (_event, nextSession) => {
+    const { data: listener } = supabase.auth.onAuthStateChange((event, nextSession) => {
       if (!mounted) return;
       setSession(nextSession);
       setUser(nextSession?.user ?? null);
-      if (nextSession?.user) {
-        await loadUserRecords(nextSession.user.id);
-      } else {
+
+      if (!nextSession?.user) {
+        initialLoadedUserId = null;
         setProfile(null);
         setDonorDetails(null);
+        setLoading(false);
+        return;
       }
-      setLoading(false);
+
+      const nextUserId = nextSession.user.id;
+      if (event === 'INITIAL_SESSION' && initialLoadedUserId === nextUserId) {
+        setLoading(false);
+        return;
+      }
+
+      // Defer Supabase data queries out of the auth lock callback
+      if (pendingTimer !== null) {
+        window.clearTimeout(pendingTimer);
+      }
+      pendingTimer = window.setTimeout(() => {
+        if (!mounted) return;
+        loadUserRecords(nextUserId).finally(() => {
+          if (mounted) setLoading(false);
+        });
+      }, 0);
     });
 
     return () => {
       mounted = false;
+      if (pendingTimer !== null) {
+        window.clearTimeout(pendingTimer);
+      }
       listener.subscription.unsubscribe();
     };
   }, [loadUserRecords]);

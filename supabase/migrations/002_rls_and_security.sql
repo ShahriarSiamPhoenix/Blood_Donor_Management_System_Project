@@ -620,6 +620,10 @@ DECLARE
   v_actor UUID := auth.uid();
   v_requester UUID;
   v_patient TEXT;
+  v_current_status TEXT;
+  v_clean_notes TEXT := NULLIF(trim(COALESCE(p_notes, '')), '');
+  v_notif_title TEXT;
+  v_notif_message TEXT;
 BEGIN
   IF NOT public.is_moderator_or_admin() THEN
     RAISE EXCEPTION 'Unauthorized: Moderator or Super Admin role required.';
@@ -629,11 +633,34 @@ BEGIN
     RAISE EXCEPTION 'Invalid status transition.';
   END IF;
 
-  SELECT requester_id, patient_name INTO v_requester, v_patient
-  FROM public.blood_requests WHERE id = p_request_id;
+  SELECT requester_id, patient_name, status
+  INTO v_requester, v_patient, v_current_status
+  FROM public.blood_requests
+  WHERE id = p_request_id
+  FOR UPDATE;
 
   IF NOT FOUND THEN
     RAISE EXCEPTION 'Blood request not found.';
+  END IF;
+
+  IF v_current_status = 'completed' THEN
+    RAISE EXCEPTION 'This blood request has already been marked as completed.';
+  END IF;
+
+  IF v_current_status IN ('cancelled', 'expired') THEN
+    RAISE EXCEPTION 'Cannot update a blood request that is already %.', v_current_status;
+  END IF;
+
+  IF p_new_status = 'completed' AND v_current_status NOT IN ('verified', 'donor_found') THEN
+    RAISE EXCEPTION 'Blood request must be verified before it can be marked completed.';
+  END IF;
+
+  IF p_new_status = 'donor_found' AND v_current_status <> 'verified' THEN
+    RAISE EXCEPTION 'Blood request must be verified before marking donor found.';
+  END IF;
+
+  IF p_new_status = v_current_status THEN
+    RAISE EXCEPTION 'Blood request is already %.', v_current_status;
   END IF;
 
   UPDATE public.blood_requests
@@ -644,12 +671,25 @@ BEGIN
   WHERE id = p_request_id;
 
   IF v_requester IS NOT NULL THEN
+    v_notif_title := left('Blood Request Updated: ' || replace(initcap(p_new_status), '_', ' '), 160);
+    v_notif_message := left(
+      trim(
+        format(
+          'Request for patient %s is now %s.%s',
+          COALESCE(NULLIF(trim(v_patient), ''), 'Patient'),
+          replace(p_new_status, '_', ' '),
+          CASE WHEN v_clean_notes IS NOT NULL THEN ' ' || v_clean_notes ELSE '' END
+        )
+      ),
+      600
+    );
+
     INSERT INTO public.notifications (user_id, type, title, message, link)
     VALUES (
       v_requester,
       CASE WHEN p_new_status = 'verified' THEN 'blood_request_verified' ELSE 'request_status_updated' END,
-      'Blood Request Updated: ' || replace(initcap(p_new_status), '_', ' '),
-      format('Request for patient %s is now %s. %s', v_patient, p_new_status, COALESCE(p_notes, '')),
+      v_notif_title,
+      v_notif_message,
       '/requests'
     );
   END IF;
@@ -660,7 +700,11 @@ BEGIN
     'blood_request_' || p_new_status,
     'blood_requests',
     p_request_id::text,
-    jsonb_build_object('notes', p_notes)
+    jsonb_build_object(
+      'previous_status', v_current_status,
+      'new_status', p_new_status,
+      'notes', v_clean_notes
+    )
   );
 END;
 $$;

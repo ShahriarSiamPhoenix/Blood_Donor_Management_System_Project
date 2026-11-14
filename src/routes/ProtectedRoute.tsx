@@ -21,6 +21,10 @@ export function ProtectedRoute({ children, allowedRoles }: ProtectedRouteProps) 
   const location = useLocation();
   const allowedRolesKey = allowedRoles ? allowedRoles.join(',') : '';
 
+  const userId = user?.id ?? null;
+  const verificationKey = `${userId || ''}|${allowedRolesKey}|${profile?.role || ''}|${String(profile?.is_active)}`;
+  const verifiedKeyRef = React.useRef<string | null>(null);
+
   const [dbAuth, setDbAuth] = useState<RoleCheckState>({
     checking: Boolean(allowedRoles?.length),
     authorized: false,
@@ -38,85 +42,114 @@ export function ProtectedRoute({ children, allowedRoles }: ProtectedRouteProps) 
         return;
       }
 
-      if (!isConfigured || !supabase || !user) {
+      if (!isConfigured || !supabase || !userId) {
+        verifiedKeyRef.current = null;
         if (active) {
           setDbAuth({ checking: false, authorized: false, reason: null });
         }
         return;
       }
 
-      if (active) {
+      const alreadyVerifiedForUser =
+        verifiedKeyRef.current === `${userId}|${allowedRolesKey}`;
+
+      if (active && !alreadyVerifiedForUser) {
         setDbAuth({ checking: true, authorized: false, reason: null });
       }
 
-      // Server/database-backed authorization check via SECURITY DEFINER RPC
-      const { data, error } = await supabase.rpc('verify_user_role', {
-        p_allowed_roles: allowedRoles,
-      });
-
-      if (!active) return;
-
-      if (!error && Array.isArray(data) && data.length > 0) {
-        const row = data[0] as { authorized: boolean; role: string | null; is_active: boolean };
-        if (!row.is_active && row.role) {
-          setDbAuth({
-            checking: false,
-            authorized: false,
-            reason: 'Your account is currently suspended. Contact a Super Administrator.',
-          });
-          return;
-        }
-        setDbAuth({
-          checking: false,
-          authorized: Boolean(row.authorized),
-          reason: row.authorized
-            ? null
-            : 'Your account does not have permission to view this dashboard. Role elevation is strictly controlled by Super Administrators in Supabase.',
+      try {
+        // Server/database-backed authorization check via SECURITY DEFINER RPC
+        const { data, error } = await supabase.rpc('verify_user_role', {
+          p_allowed_roles: allowedRoles,
         });
-        return;
-      }
-
-      // If RPC is not yet deployed (PGRST202), verify directly against the database profiles table (fail closed)
-      if (error && (error.code === 'PGRST202' || error.message?.includes('verify_user_role'))) {
-        const { data: freshProfile, error: profileErr } = await supabase
-          .from('profiles')
-          .select('role, is_active')
-          .eq('id', user.id)
-          .maybeSingle();
 
         if (!active) return;
 
-        if (profileErr || !freshProfile) {
+        if (!error && Array.isArray(data) && data.length > 0) {
+          const row = data[0] as { authorized: boolean; role: string | null; is_active: boolean };
+          if (!row.is_active && row.role) {
+            verifiedKeyRef.current = null;
+            setDbAuth({
+              checking: false,
+              authorized: false,
+              reason: 'Your account is currently suspended. Contact a Super Administrator.',
+            });
+            return;
+          }
+          if (row.authorized) {
+            verifiedKeyRef.current = `${userId}|${allowedRolesKey}`;
+          } else {
+            verifiedKeyRef.current = null;
+          }
           setDbAuth({
             checking: false,
-            authorized: false,
-            reason: 'Unable to verify your profile permissions from the database.',
+            authorized: Boolean(row.authorized),
+            reason: row.authorized
+              ? null
+              : 'Your account does not have permission to view this dashboard. Role elevation is strictly controlled by Super Administrators in Supabase.',
           });
           return;
         }
 
-        const isAllowed =
-          Boolean(freshProfile.is_active) &&
-          allowedRoles.includes(freshProfile.role as UserRole);
+        // If RPC is not yet deployed (PGRST202), verify directly against the database profiles table (fail closed)
+        if (error && (error.code === 'PGRST202' || error.message?.includes('verify_user_role'))) {
+          const { data: freshProfile, error: profileErr } = await supabase
+            .from('profiles')
+            .select('role, is_active')
+            .eq('id', userId)
+            .maybeSingle();
 
+          if (!active) return;
+
+          if (profileErr || !freshProfile) {
+            verifiedKeyRef.current = null;
+            setDbAuth({
+              checking: false,
+              authorized: false,
+              reason: 'Unable to verify your profile permissions from the database.',
+            });
+            return;
+          }
+
+          const isAllowed =
+            Boolean(freshProfile.is_active) &&
+            allowedRoles.includes(freshProfile.role as UserRole);
+
+          if (isAllowed) {
+            verifiedKeyRef.current = `${userId}|${allowedRolesKey}`;
+          } else {
+            verifiedKeyRef.current = null;
+          }
+
+          setDbAuth({
+            checking: false,
+            authorized: isAllowed,
+            reason: isAllowed
+              ? null
+              : !freshProfile.is_active
+                ? 'Your account is currently suspended. Contact a Super Administrator.'
+                : 'Your account does not have permission to view this dashboard. Role elevation is strictly controlled by Super Administrators in Supabase.',
+          });
+          return;
+        }
+
+        // Fail closed on any unexpected database authorization error
+        verifiedKeyRef.current = null;
         setDbAuth({
           checking: false,
-          authorized: isAllowed,
-          reason: isAllowed
-            ? null
-            : !freshProfile.is_active
-              ? 'Your account is currently suspended. Contact a Super Administrator.'
-              : 'Your account does not have permission to view this dashboard. Role elevation is strictly controlled by Super Administrators in Supabase.',
+          authorized: false,
+          reason: 'Database role authorization check failed. Access denied.',
         });
-        return;
+      } catch {
+        if (!active) return;
+        if (!alreadyVerifiedForUser) {
+          setDbAuth({
+            checking: false,
+            authorized: false,
+            reason: 'Database role authorization check failed. Access denied.',
+          });
+        }
       }
-
-      // Fail closed on any unexpected database authorization error
-      setDbAuth({
-        checking: false,
-        authorized: false,
-        reason: 'Database role authorization check failed. Access denied.',
-      });
     }
 
     if (!loading) {
@@ -126,7 +159,7 @@ export function ProtectedRoute({ children, allowedRoles }: ProtectedRouteProps) 
     return () => {
       active = false;
     };
-  }, [loading, isConfigured, user, profile?.role, profile?.is_active, allowedRolesKey]);
+  }, [loading, isConfigured, userId, verificationKey, allowedRolesKey]);
 
   if (loading || (Boolean(user) && Boolean(allowedRoles?.length) && dbAuth.checking)) {
     return (

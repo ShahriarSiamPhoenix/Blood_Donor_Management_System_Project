@@ -21,6 +21,7 @@ import {
 } from '../../services/publicService';
 import type { PublicBloodRequest, PublicPlatformStats, TestimonialItem } from '../../types/database';
 import { BLOOD_GROUPS } from '../../utils/bloodCompatibility';
+import { formatRequestStatusLabel, getRequestStatusBadgeClass } from '../../utils/requestStatus';
 import donorCareImg from '../../assets/images/about_donor_care_1794561232149.jpg';
 
 const FAQS = [
@@ -57,17 +58,22 @@ export function HomePage() {
     let active = true;
     async function load() {
       setLoading(true);
-      const [statsRes, reqRes, testRes] = await Promise.all([
-        fetchPublicPlatformStats(),
-        fetchPublicBloodRequests({ page: 1, pageSize: 4 }),
-        fetchApprovedTestimonials(),
-      ]);
-      if (!active) return;
-      setStats(statsRes.stats);
-      setSchemaError(statsRes.error);
-      setRecentRequests(reqRes.requests);
-      setTestimonials(testRes);
-      setLoading(false);
+      try {
+        const [statsRes, reqRes, testRes] = await Promise.all([
+          fetchPublicPlatformStats(),
+          fetchPublicBloodRequests({ page: 1, pageSize: 4 }),
+          fetchApprovedTestimonials(),
+        ]);
+        if (!active) return;
+        setStats(statsRes.stats);
+        setSchemaError(statsRes.error);
+        setRecentRequests(reqRes.requests);
+        setTestimonials(testRes);
+      } catch {
+        // Keep safe defaults
+      } finally {
+        if (active) setLoading(false);
+      }
     }
     load();
     return () => {
@@ -291,14 +297,20 @@ export function HomePage() {
                   >
                     <div className="flex items-start justify-between gap-4">
                       <div>
-                        <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
-                          {req.is_emergency && (
+                        <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
+                          {req.is_emergency && req.status !== 'completed' && (
                             <span className="font-semibold text-[#C62828] dark:text-red-400">
                               Emergency
                             </span>
                           )}
-                          {req.is_emergency && <span aria-hidden="true">·</span>}
-                          <span>{req.status.replace('_', ' ')}</span>
+                          {req.is_emergency && req.status !== 'completed' && <span aria-hidden="true">·</span>}
+                          <span
+                            className={`inline-flex items-center rounded border px-1.5 py-0.5 text-[11px] font-semibold ${getRequestStatusBadgeClass(
+                              req.status
+                            )}`}
+                          >
+                            {formatRequestStatusLabel(req.status)}
+                          </span>
                           <span aria-hidden="true">·</span>
                           <span className="font-mono-tabular">
                             {req.bags_needed} {req.bags_needed === 1 ? 'bag' : 'bags'}
