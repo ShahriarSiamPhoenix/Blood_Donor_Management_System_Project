@@ -398,10 +398,10 @@ export function StudentDashboard() {
         <div className="rounded-xl border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900">
           <p className="text-xs font-medium text-slate-500 dark:text-slate-400">Recorded Donations</p>
           <p className="font-mono-tabular mt-1.5 text-2xl font-bold text-slate-900 dark:text-white">
-            {donorDetails?.total_donations ?? 0}
+            {Math.max(donorDetails?.total_donations ?? 0, donations.length)}
           </p>
           <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-            Last: {donorDetails?.last_donation_date || 'No donation recorded'}
+            Last: {donorDetails?.last_donation_date || donations[0]?.donation_date || 'No donation recorded'}
           </p>
         </div>
       </div>

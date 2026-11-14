@@ -128,15 +128,32 @@ export async function reviewVerificationRequest(
 export async function moderateBloodRequestStatus(
   requestId: string,
   newStatus: Exclude<RequestStatus, 'pending'>,
-  notes?: string
+  notes?: string,
+  donorId?: string | null
 ) {
   const client = assertSupabase();
   await assertDatabaseRole(['moderator', 'super_admin']);
-  const { error } = await client.rpc('moderate_blood_request', {
+
+  const cleanNotes = notes?.trim() || null;
+  const cleanDonorId = donorId?.trim() || null;
+
+  let { error } = await client.rpc('moderate_blood_request', {
     p_request_id: requestId,
     p_new_status: newStatus,
-    p_notes: notes?.trim() || null,
+    p_notes: cleanNotes,
+    p_donor_id: cleanDonorId,
   });
+
+  // Backward compatibility if migration 007 has not been applied yet
+  if (error && error.code === 'PGRST202' && !cleanDonorId) {
+    const retry = await client.rpc('moderate_blood_request', {
+      p_request_id: requestId,
+      p_new_status: newStatus,
+      p_notes: cleanNotes,
+    });
+    error = retry.error;
+  }
+
   if (error) {
     throw new Error(formatRequestStatusError(error));
   }

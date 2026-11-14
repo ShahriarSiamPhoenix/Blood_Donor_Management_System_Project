@@ -114,6 +114,7 @@ export interface BloodRequest {
   status: RequestStatus;
   verified_by: string | null;
   verified_at: string | null;
+  fulfilled_by_donor_id?: string | null;
   created_at: string;
   updated_at: string;
 }

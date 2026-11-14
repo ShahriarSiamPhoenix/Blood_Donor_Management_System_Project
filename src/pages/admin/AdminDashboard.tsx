@@ -43,6 +43,10 @@ import type {
 } from '../../types/database';
 import { BLOOD_GROUPS } from '../../utils/bloodCompatibility';
 import {
+  buildMonthlyDonationTrends,
+  countUniqueCompletedDonations,
+} from '../../utils/donationStats';
+import {
   canCompleteBloodRequest,
   formatRequestStatusError,
   formatRequestStatusLabel,
@@ -87,8 +91,10 @@ export function AdminDashboard() {
     donationDate: new Date().toISOString().slice(0, 10),
     hospitalName: 'Netrokona Sadar Hospital',
     unitsDonated: 1,
+    bloodRequestId: '',
     notes: '',
   });
+  const [completionDonorMap, setCompletionDonorMap] = useState<Record<string, string>>({});
   const [settingDrafts, setSettingDrafts] = useState<Record<string, string>>({});
   const [busyRequestIds, setBusyRequestIds] = useState<Record<string, boolean>>({});
   const [recordingDonation, setRecordingDonation] = useState(false);
@@ -144,7 +150,7 @@ export function AdminDashboard() {
       (u) => u.donor_details?.is_available && u.donor_details?.is_publicly_discoverable
     );
     const activeRequests = requests.filter((r) => r.status === 'verified' || r.status === 'donor_found');
-    const completedDonations = donations.length;
+    const completedDonations = countUniqueCompletedDonations(requests, donations);
 
     const bloodGroupData = BLOOD_GROUPS.map((bg) => ({
       group: bg,
@@ -161,15 +167,7 @@ export function AdminDashboard() {
       count,
     }));
 
-    const monthMap: Record<string, number> = {};
-    for (const d of donations) {
-      const month = (d.donation_date || '').slice(0, 7);
-      if (!month) continue;
-      monthMap[month] = (monthMap[month] || 0) + (Number(d.units_donated) || 0);
-    }
-    const monthlyTrends = Object.entries(monthMap)
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([month, units]) => ({ month, units }));
+    const monthlyTrends = buildMonthlyDonationTrends(requests, donations);
 
     const reqStatusMap: Record<string, number> = {};
     for (const r of requests) {
@@ -236,7 +234,12 @@ export function AdminDashboard() {
     }
     setRecordingDonation(true);
     try {
-      await adminRecordDonation({ ...donationForm, verifiedBy: user.id });
+      await adminRecordDonation({
+        ...donationForm,
+        bloodRequestId: donationForm.bloodRequestId || undefined,
+        verifiedBy: user.id,
+      });
+      setDonationForm((prev) => ({ ...prev, bloodRequestId: '', notes: '' }));
       showToast('Donation Recorded', 'success', 'Donor totals and last donation date updated.');
       await loadAll(true);
     } catch (err) {
@@ -326,8 +329,10 @@ export function AdminDashboard() {
     }
 
     setBusyRequestIds((prev) => ({ ...prev, [requestId]: true }));
+    const selectedDonorId =
+      nextStatus === 'completed' ? completionDonorMap[requestId] || null : null;
     try {
-      await moderateBloodRequestStatus(requestId, nextStatus);
+      await moderateBloodRequestStatus(requestId, nextStatus, undefined, selectedDonorId);
       const nowIso = new Date().toISOString();
       setRequests((prev) =>
         prev.map((item) =>
@@ -337,6 +342,7 @@ export function AdminDashboard() {
                 status: nextStatus,
                 verified_by: nextStatus === 'verified' ? user?.id ?? item.verified_by : item.verified_by,
                 verified_at: nextStatus === 'verified' ? nowIso : item.verified_at,
+                fulfilled_by_donor_id: selectedDonorId ?? item.fulfilled_by_donor_id,
                 updated_at: nowIso,
               }
             : item
@@ -346,7 +352,9 @@ export function AdminDashboard() {
         nextStatus === 'completed' ? 'Donation Completed' : 'Blood Request Updated',
         'success',
         nextStatus === 'completed'
-          ? 'The blood donation request has been marked as completed.'
+          ? selectedDonorId
+            ? 'Blood request marked completed and donor donation count updated.'
+            : 'The blood donation request has been marked as completed.'
           : `Request status updated to ${formatRequestStatusLabel(nextStatus)}.`
       );
       await loadAll(true);
@@ -732,14 +740,37 @@ export function AdminDashboard() {
                         </button>
                       )}
                       {canCompleteBloodRequest(r.status) && (
-                        <button
-                          type="button"
-                          disabled={isBusy}
-                          onClick={() => handleModerateRequest(r.id, 'completed')}
-                          className="rounded-lg bg-[#C62828] px-3 py-1.5 text-xs font-semibold text-white hover:bg-[#B71C1C] disabled:cursor-not-allowed disabled:opacity-60"
-                        >
-                          {isBusy ? 'Completing...' : 'Donation Complete'}
-                        </button>
+                        <>
+                          <select
+                            aria-label={`Donor for ${r.patient_name}`}
+                            disabled={isBusy}
+                            value={completionDonorMap[r.id] || ''}
+                            onChange={(e) =>
+                              setCompletionDonorMap((prev) => ({
+                                ...prev,
+                                [r.id]: e.target.value,
+                              }))
+                            }
+                            className="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs text-slate-700 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200"
+                          >
+                            <option value="">Optional: Link donor</option>
+                            {users
+                              .filter((u) => u.is_active)
+                              .map((u) => (
+                                <option key={u.id} value={u.id}>
+                                  {u.full_name} ({u.donor_details?.blood_group || '—'})
+                                </option>
+                              ))}
+                          </select>
+                          <button
+                            type="button"
+                            disabled={isBusy}
+                            onClick={() => handleModerateRequest(r.id, 'completed')}
+                            className="rounded-lg bg-[#C62828] px-3 py-1.5 text-xs font-semibold text-white hover:bg-[#B71C1C] disabled:cursor-not-allowed disabled:opacity-60"
+                          >
+                            {isBusy ? 'Completing...' : 'Donation Complete'}
+                          </button>
+                        </>
                       )}
                       {r.status === 'completed' && (
                         <span className="inline-flex items-center rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-950/40 dark:text-emerald-300">
@@ -826,6 +857,37 @@ export function AdminDashboard() {
                   }
                   className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-950"
                 />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold">
+                  Linked Blood Request (Optional)
+                </label>
+                <select
+                  value={donationForm.bloodRequestId}
+                  onChange={(e) => {
+                    const req = requests.find((item) => item.id === e.target.value);
+                    setDonationForm({
+                      ...donationForm,
+                      bloodRequestId: e.target.value,
+                      hospitalName: req ? req.hospital_name : donationForm.hospitalName,
+                      bloodGroup: req ? req.required_blood_group : donationForm.bloodGroup,
+                    });
+                  }}
+                  className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-950"
+                >
+                  <option value="">Standalone donation (no linked request)</option>
+                  {requests
+                    .filter(
+                      (r) =>
+                        (r.status === 'completed' || r.status === 'verified' || r.status === 'donor_found') &&
+                        !donations.some((d) => d.blood_request_id === r.id)
+                    )
+                    .map((r) => (
+                      <option key={r.id} value={r.id}>
+                        {r.patient_name} · {r.required_blood_group} ({formatRequestStatusLabel(r.status)})
+                      </option>
+                    ))}
+                </select>
               </div>
               <button
                 type="submit"

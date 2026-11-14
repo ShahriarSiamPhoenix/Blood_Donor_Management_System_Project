@@ -309,8 +309,21 @@ BEGIN
     AND is_available = true
     AND is_publicly_discoverable = true;
 
-  SELECT COALESCE(SUM(total_donations), 0) INTO v_total_donations
-  FROM public.donor_details;
+  SELECT
+    (SELECT COUNT(*)::INTEGER FROM public.blood_requests WHERE status = 'completed')
+    +
+    (
+      SELECT COUNT(*)::INTEGER
+      FROM public.donation_history dh
+      WHERE dh.blood_request_id IS NULL
+         OR NOT EXISTS (
+           SELECT 1
+           FROM public.blood_requests br
+           WHERE br.id = dh.blood_request_id
+             AND br.status = 'completed'
+         )
+    )
+  INTO v_total_donations;
 
   SELECT COUNT(*) INTO v_active_requests
   FROM public.blood_requests
@@ -606,10 +619,12 @@ END;
 $$;
 
 -- F. Moderator / Admin Blood Request Status Update RPC
+DROP FUNCTION IF EXISTS public.moderate_blood_request(UUID, TEXT, TEXT);
 CREATE OR REPLACE FUNCTION public.moderate_blood_request(
   p_request_id UUID,
   p_new_status TEXT,
-  p_notes TEXT DEFAULT NULL
+  p_notes TEXT DEFAULT NULL,
+  p_donor_id UUID DEFAULT NULL
 )
 RETURNS VOID
 LANGUAGE plpgsql
@@ -621,6 +636,10 @@ DECLARE
   v_requester UUID;
   v_patient TEXT;
   v_current_status TEXT;
+  v_blood_group TEXT;
+  v_hospital_name TEXT;
+  v_existing_donor_id UUID;
+  v_resolved_donor_id UUID;
   v_clean_notes TEXT := NULLIF(trim(COALESCE(p_notes, '')), '');
   v_notif_title TEXT;
   v_notif_message TEXT;
@@ -633,8 +652,20 @@ BEGIN
     RAISE EXCEPTION 'Invalid status transition.';
   END IF;
 
-  SELECT requester_id, patient_name, status
-  INTO v_requester, v_patient, v_current_status
+  SELECT
+    requester_id,
+    patient_name,
+    status,
+    required_blood_group,
+    hospital_name,
+    fulfilled_by_donor_id
+  INTO
+    v_requester,
+    v_patient,
+    v_current_status,
+    v_blood_group,
+    v_hospital_name,
+    v_existing_donor_id
   FROM public.blood_requests
   WHERE id = p_request_id
   FOR UPDATE;
@@ -663,12 +694,62 @@ BEGIN
     RAISE EXCEPTION 'Blood request is already %.', v_current_status;
   END IF;
 
+  IF p_new_status = 'completed' THEN
+    IF p_donor_id IS NOT NULL THEN
+      IF NOT EXISTS (SELECT 1 FROM public.profiles WHERE id = p_donor_id) THEN
+        RAISE EXCEPTION 'Selected donor profile not found.';
+      END IF;
+      v_resolved_donor_id := p_donor_id;
+    ELSIF v_existing_donor_id IS NOT NULL THEN
+      v_resolved_donor_id := v_existing_donor_id;
+    ELSE
+      SELECT cr.donor_id
+      INTO v_resolved_donor_id
+      FROM public.contact_requests cr
+      WHERE cr.blood_request_id = p_request_id
+        AND cr.status = 'accepted'
+      ORDER BY cr.responded_at ASC NULLS LAST, cr.created_at ASC
+      LIMIT 1;
+    END IF;
+  END IF;
+
   UPDATE public.blood_requests
   SET
     status = p_new_status,
     verified_by = CASE WHEN p_new_status = 'verified' THEN v_actor ELSE verified_by END,
-    verified_at = CASE WHEN p_new_status = 'verified' THEN now() ELSE verified_at END
+    verified_at = CASE WHEN p_new_status = 'verified' THEN now() ELSE verified_at END,
+    fulfilled_by_donor_id = CASE
+      WHEN p_new_status = 'completed' THEN COALESCE(v_resolved_donor_id, fulfilled_by_donor_id)
+      ELSE fulfilled_by_donor_id
+    END
   WHERE id = p_request_id;
+
+  IF p_new_status = 'completed'
+     AND v_resolved_donor_id IS NOT NULL
+     AND NOT EXISTS (
+       SELECT 1 FROM public.donation_history WHERE blood_request_id = p_request_id
+     ) THEN
+    INSERT INTO public.donation_history (
+      donor_id,
+      blood_request_id,
+      blood_group,
+      donation_date,
+      hospital_name,
+      units_donated,
+      notes,
+      verified_by
+    )
+    VALUES (
+      v_resolved_donor_id,
+      p_request_id,
+      v_blood_group,
+      CURRENT_DATE,
+      v_hospital_name,
+      1,
+      left(COALESCE(v_clean_notes, 'Completed via blood request for ' || COALESCE(NULLIF(trim(v_patient), ''), 'patient')), 500),
+      v_actor
+    );
+  END IF;
 
   IF v_requester IS NOT NULL THEN
     v_notif_title := left('Blood Request Updated: ' || replace(initcap(p_new_status), '_', ' '), 160);
@@ -703,6 +784,7 @@ BEGIN
     jsonb_build_object(
       'previous_status', v_current_status,
       'new_status', p_new_status,
+      'fulfilled_by_donor_id', v_resolved_donor_id,
       'notes', v_clean_notes
     )
   );
@@ -812,6 +894,6 @@ GRANT EXECUTE ON FUNCTION public.search_public_donors(TEXT, UUID, TEXT, TEXT, BO
 GRANT EXECUTE ON FUNCTION public.get_public_blood_requests(TEXT, TEXT, TEXT, INTEGER, INTEGER) TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.create_contact_request(UUID, TEXT, TEXT, UUID) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.review_donor_verification(UUID, TEXT, TEXT) TO authenticated;
-GRANT EXECUTE ON FUNCTION public.moderate_blood_request(UUID, TEXT, TEXT) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.moderate_blood_request(UUID, TEXT, TEXT, UUID) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.admin_update_user_role(UUID, TEXT) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.expire_past_due_blood_requests() TO authenticated;
