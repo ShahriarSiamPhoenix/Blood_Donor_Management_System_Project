@@ -32,7 +32,7 @@ export const translations = {
     },
     sections: {
       bloodGroupAvailability: 'Available Donors by Blood Group',
-      recentRequests: 'Recent Verified Blood Requests',
+      recentRequests: 'Recent Blood Requests',
       howItWorks: 'How Campus Blood Connect Works',
       whyDonate: 'Why Voluntary Blood Donation Matters',
       testimonials: 'Student Donor Voices',

@@ -40,10 +40,10 @@ export function Navbar() {
         {/* Zone 1: Single-line Brand Wordmark */}
         <Link
           to="/"
-          className="flex min-w-0 items-center gap-2 whitespace-nowrap shrink-0 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-700"
+          className="flex min-w-0 items-center gap-1.5 sm:gap-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-700"
         >
           <BrandLogo className="h-7 w-7 shrink-0 sm:h-8 sm:w-8" />
-          <span className="font-display text-sm font-bold tracking-tight text-slate-900 sm:text-lg dark:text-white">
+          <span className="font-display truncate text-sm font-bold tracking-tight text-slate-900 sm:text-lg dark:text-white">
             {t.brandName}
           </span>
         </Link>

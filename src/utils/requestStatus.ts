@@ -1,15 +1,21 @@
-import type { RequestStatus } from '../types/database';
+import type { InterestStatus, RequestStatus } from '../types/database';
 
 const VALID_TRANSITIONS: Record<RequestStatus, readonly RequestStatus[]> = {
-  pending: ['verified', 'cancelled', 'expired'],
+  pending: ['verified', 'donor_found', 'completed', 'cancelled', 'expired'],
   verified: ['donor_found', 'completed', 'cancelled', 'expired'],
-  donor_found: ['completed', 'cancelled', 'expired'],
+  donor_found: ['completed', 'cancelled', 'expired', 'pending', 'verified'],
   completed: [],
   cancelled: [],
   expired: [],
 };
 
+const ACTIVE_STATUSES = new Set<RequestStatus>(['pending', 'verified', 'donor_found']);
 const TERMINAL_STATUSES = new Set<RequestStatus>(['completed', 'cancelled', 'expired']);
+
+export function isActiveRequestStatus(status: string | null | undefined): boolean {
+  if (!status) return false;
+  return ACTIVE_STATUSES.has(status as RequestStatus);
+}
 
 export function isTerminalRequestStatus(status: string | null | undefined): boolean {
   if (!status) return false;
@@ -17,7 +23,27 @@ export function isTerminalRequestStatus(status: string | null | undefined): bool
 }
 
 export function canCompleteBloodRequest(status: string | null | undefined): boolean {
-  return status === 'verified' || status === 'donor_found';
+  return isActiveRequestStatus(status);
+}
+
+export function canExpressInterestInRequest(params: {
+  status: string | null | undefined;
+  isOwner?: boolean;
+  viewerInterestStatus?: InterestStatus | null;
+}): boolean {
+  if (!isActiveRequestStatus(params.status)) return false;
+  if (params.isOwner) return false;
+  return params.viewerInterestStatus !== 'interested' && params.viewerInterestStatus !== 'selected';
+}
+
+export function canWithdrawInterestFromRequest(params: {
+  status: string | null | undefined;
+  isOwner?: boolean;
+  viewerInterestStatus?: InterestStatus | null;
+}): boolean {
+  if (!isActiveRequestStatus(params.status)) return false;
+  if (params.isOwner) return false;
+  return params.viewerInterestStatus === 'interested' || params.viewerInterestStatus === 'selected';
 }
 
 export function canTransitionRequestStatus(
@@ -54,10 +80,10 @@ export function validateRequestStatusTransition(
     };
   }
 
-  if (nextStatus === 'completed' && normalizedCurrent === 'pending') {
+  if (normalizedCurrent === nextStatus) {
     return {
       valid: false,
-      reason: 'Verify the blood request before marking donation complete.',
+      reason: `Blood request is already ${formatRequestStatusLabel(normalizedCurrent)}.`,
     };
   }
 
@@ -74,7 +100,7 @@ export function validateRequestStatusTransition(
 export function formatRequestStatusLabel(status: string | null | undefined): string {
   switch (status) {
     case 'pending':
-      return 'Pending';
+      return 'Open';
     case 'verified':
       return 'Verified';
     case 'donor_found':
@@ -122,14 +148,20 @@ export function formatRequestStatusError(error: unknown): string {
   if (lower.includes('already') && lower.includes('completed')) {
     return 'This blood donation request has already been marked as completed.';
   }
+  if (lower.includes('already expressed interest')) {
+    return 'You have already expressed interest in this blood request.';
+  }
+  if (lower.includes('own blood request')) {
+    return 'You cannot express interest in your own blood request.';
+  }
   if (lower.includes('unauthorized') || lower.includes('role required')) {
-    return 'Only authorized moderators or super administrators can update request statuses.';
+    if (lower.includes('owner')) {
+      return 'Only the request owner or staff can perform this action.';
+    }
+    return 'You are not authorized to perform this action.';
   }
   if (lower.includes('not found')) {
-    return 'Blood request record could not be found. Please refresh the dashboard.';
-  }
-  if (lower.includes('must be verified')) {
-    return 'Please verify the blood request before marking donation complete.';
+    return 'Blood request record could not be found. Please refresh the page.';
   }
 
   return raw;

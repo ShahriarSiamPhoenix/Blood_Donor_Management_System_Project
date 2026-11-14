@@ -138,6 +138,26 @@ export async function fetchPublicBloodRequests(filters: BloodRequestFilters): Pr
   return { requests: rows, totalCount, error: null };
 }
 
+export async function fetchPublicBloodRequestById(
+  requestId: string
+): Promise<PublicBloodRequest | null> {
+  if (!isSupabaseConfigured || !supabase || !requestId) {
+    return null;
+  }
+
+  const { data, error } = await supabase.rpc('get_public_blood_requests', {
+    p_blood_group: null,
+    p_location: null,
+    p_status: null,
+    p_limit: 50,
+    p_offset: 0,
+  });
+
+  if (error || !data) return null;
+  const rows = data as PublicBloodRequest[];
+  return rows.find((item) => item.id === requestId) || null;
+}
+
 export async function fetchActiveDepartments(): Promise<Department[]> {
   if (!isSupabaseConfigured || !supabase) {
     return [];

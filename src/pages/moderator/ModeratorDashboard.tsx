@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
-import { CheckCircle2, ClipboardList, Flag, ShieldCheck, XCircle } from 'lucide-react';
+import { CheckCircle2, ClipboardList, Flag, ShieldCheck, Trash2, Users, XCircle } from 'lucide-react';
+import { ConfirmDialog } from '../../components/common/ConfirmDialog';
+import { InterestedMembersModal } from '../../components/requests/InterestedMembersModal';
 import { useAuth } from '../../contexts/AuthContext';
 import { useToast } from '../../contexts/ToastContext';
 import {
@@ -7,6 +9,7 @@ import {
   moderateBloodRequestStatus,
   resolveReport,
   reviewVerificationRequest,
+  staffRemoveBloodRequest,
 } from '../../services/adminService';
 import type {
   AdminLogItem,
@@ -37,6 +40,9 @@ export function ModeratorDashboard() {
   const [logs, setLogs] = useState<AdminLogItem[]>([]);
   const [notesMap, setNotesMap] = useState<Record<string, string>>({});
   const [busyRequestIds, setBusyRequestIds] = useState<Record<string, boolean>>({});
+  const [interestedTarget, setInterestedTarget] = useState<BloodRequest | null>(null);
+  const [removeTarget, setRemoveTarget] = useState<BloodRequest | null>(null);
+  const [removingRequest, setRemovingRequest] = useState(false);
 
   const loadData = useCallback(
     async (silent = false) => {
@@ -145,6 +151,24 @@ export function ModeratorDashboard() {
     }
   };
 
+  const handleRemoveRequest = async () => {
+    if (!removeTarget || removingRequest) return;
+    setRemovingRequest(true);
+    try {
+      await staffRemoveBloodRequest(
+        removeTarget.id,
+        notesMap[removeTarget.id] || 'Removed by campus moderator oversight.'
+      );
+      showToast('Request Removed', 'info', 'Blood request removed from active listings.');
+      setRemoveTarget(null);
+      await loadData(true);
+    } catch (err) {
+      showToast('Removal Failed', 'error', err instanceof Error ? err.message : 'Error');
+    } finally {
+      setRemovingRequest(false);
+    }
+  };
+
   const pendingVerifications = verifications.filter((v) => v.status === 'pending');
   const pendingRequests = requests.filter((r) => r.status === 'pending');
   const openReports = reports.filter((r) => r.status === 'open' || r.status === 'reviewing');
@@ -159,8 +183,8 @@ export function ModeratorDashboard() {
           Moderator Dashboard
         </h1>
         <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">
-          Review student donor verifications, verify urgent blood requests, and resolve community
-          reports.
+          Review student donor verifications, oversee community blood requests, inspect interested
+          donors, and resolve reports.
         </p>
       </div>
 
@@ -176,7 +200,7 @@ export function ModeratorDashboard() {
         </div>
         <div className="rounded-xl border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900">
           <p className="text-xs font-medium text-slate-500 dark:text-slate-400">
-            Pending Blood Requests
+            Open Community Requests
           </p>
           <p className="font-mono-tabular mt-1.5 text-3xl font-bold text-[#C62828] dark:text-red-400">
             {pendingRequests.length}
@@ -323,6 +347,14 @@ export function ModeratorDashboard() {
                       </div>
 
                       <div className="flex flex-wrap items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setInterestedTarget(r)}
+                          className="inline-flex items-center gap-1 rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200"
+                        >
+                          <Users className="h-3.5 w-3.5 text-[#C62828]" />
+                          Interested ({r.interested_count ?? 0})
+                        </button>
                         {r.status === 'pending' && (
                           <button
                             type="button"
@@ -333,7 +365,7 @@ export function ModeratorDashboard() {
                             {isBusy ? 'Updating...' : 'Verify Request'}
                           </button>
                         )}
-                        {r.status === 'verified' && (
+                        {(r.status === 'pending' || r.status === 'verified') && (
                           <button
                             type="button"
                             disabled={isBusy}
@@ -367,9 +399,20 @@ export function ModeratorDashboard() {
                               onClick={() => handleModerateRequest(r.id, 'cancelled')}
                               className="rounded-lg border border-red-300 px-3 py-1.5 text-xs font-semibold text-[#C62828] disabled:cursor-not-allowed disabled:opacity-60 dark:border-red-900 dark:text-red-400"
                             >
-                              Reject / Cancel
+                              Cancel
                             </button>
                           )}
+                        {r.status !== 'completed' && (
+                          <button
+                            type="button"
+                            disabled={isBusy}
+                            onClick={() => setRemoveTarget(r)}
+                            className="inline-flex items-center gap-1 rounded-lg border border-red-200 px-2.5 py-1.5 text-xs font-semibold text-[#C62828] hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-red-900/60 dark:text-red-400"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                            Remove
+                          </button>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -450,6 +493,30 @@ export function ModeratorDashboard() {
           </div>
         )}
       </div>
+
+      <InterestedMembersModal
+        open={Boolean(interestedTarget)}
+        request={interestedTarget}
+        canManage
+        onClose={() => setInterestedTarget(null)}
+        onDonorSelected={(donorId) => {
+          setInterestedTarget((prev) =>
+            prev ? { ...prev, status: 'donor_found', fulfilled_by_donor_id: donorId } : null
+          );
+          loadData(true);
+        }}
+      />
+
+      <ConfirmDialog
+        open={Boolean(removeTarget)}
+        title="Remove Blood Request?"
+        description="This permanently removes a flagged or inappropriate non-completed request and notifies the requester. Completed donations cannot be deleted."
+        confirmLabel="Remove Request"
+        destructive
+        loading={removingRequest}
+        onConfirm={handleRemoveRequest}
+        onCancel={() => setRemoveTarget(null)}
+      />
     </div>
   );
 }

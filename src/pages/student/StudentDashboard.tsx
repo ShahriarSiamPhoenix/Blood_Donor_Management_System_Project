@@ -3,15 +3,20 @@ import { Link } from 'react-router-dom';
 import {
   Camera,
   Check,
+  CheckCircle2,
   FileUp,
   Plus,
   ShieldCheck,
   ToggleLeft,
   ToggleRight,
+  UserCheck,
+  Users,
   X,
 } from 'lucide-react';
 import { ConfirmDialog } from '../../components/common/ConfirmDialog';
 import { SearchableDepartmentSelect } from '../../components/common/SearchableDepartmentSelect';
+import { CompleteDonationModal } from '../../components/requests/CompleteDonationModal';
+import { InterestedMembersModal } from '../../components/requests/InterestedMembersModal';
 import { useAuth } from '../../contexts/AuthContext';
 import { useToast } from '../../contexts/ToastContext';
 import {
@@ -37,7 +42,12 @@ import type {
 } from '../../types/database';
 import { BLOOD_GROUPS } from '../../utils/bloodCompatibility';
 import { formatDepartmentLabel } from '../../utils/departments';
-import { formatRequestStatusLabel, getRequestStatusBadgeClass } from '../../utils/requestStatus';
+import {
+  canCompleteBloodRequest,
+  formatRequestStatusLabel,
+  getRequestStatusBadgeClass,
+  isActiveRequestStatus,
+} from '../../utils/requestStatus';
 import { computeProfileCompletion } from '../../utils/validation';
 
 type TabKey = 'profile' | 'requests' | 'contacts' | 'donations';
@@ -77,6 +87,11 @@ export function StudentDashboard() {
   const [docNotes, setDocNotes] = useState('');
   const [submittingDoc, setSubmittingDoc] = useState(false);
   const [cancelTargetId, setCancelTargetId] = useState<string | null>(null);
+  const [interestedTarget, setInterestedTarget] = useState<BloodRequest | null>(null);
+  const [completeTarget, setCompleteTarget] = useState<{
+    request: BloodRequest;
+    initialDonorId?: string | null;
+  } | null>(null);
 
   const [testimonialQuote, setTestimonialQuote] = useState('');
   const [submittingTestimonial, setSubmittingTestimonial] = useState(false);
@@ -672,7 +687,7 @@ export function StudentDashboard() {
                 {myRequests.map((req) => (
                   <div
                     key={req.id}
-                    className="flex flex-col justify-between gap-3 py-4 sm:flex-row sm:items-center"
+                    className="flex flex-col justify-between gap-3 py-4 lg:flex-row lg:items-center"
                   >
                     <div>
                       <p className="text-sm font-bold text-slate-900 dark:text-white">
@@ -689,17 +704,57 @@ export function StudentDashboard() {
                         >
                           {formatRequestStatusLabel(req.status)}
                         </span>
+                        <span className="font-mono-tabular">
+                          · {req.interested_count ?? 0} interested
+                        </span>
                       </p>
                     </div>
-                    {(req.status === 'pending' || req.status === 'verified') && (
-                      <button
-                        type="button"
-                        onClick={() => setCancelTargetId(req.id)}
-                        className="rounded-lg border border-red-200 px-3 py-1.5 text-xs font-semibold text-[#C62828] hover:bg-red-50 dark:border-red-900/60 dark:text-red-400"
-                      >
-                        Cancel Request
-                      </button>
-                    )}
+                    <div className="flex flex-wrap items-center gap-2">
+                      {isActiveRequestStatus(req.status) && (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => setInterestedTarget(req)}
+                            className="inline-flex items-center gap-1 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-800 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200"
+                          >
+                            <Users className="h-3.5 w-3.5 text-[#C62828]" />
+                            Interested ({req.interested_count ?? 0})
+                          </button>
+                          {(req.status === 'pending' || req.status === 'verified') && (
+                            <button
+                              type="button"
+                              onClick={() => setInterestedTarget(req)}
+                              className="inline-flex items-center gap-1 rounded-lg bg-slate-900 px-3 py-1.5 text-xs font-semibold text-white hover:bg-slate-800 dark:bg-slate-700"
+                            >
+                              <UserCheck className="h-3.5 w-3.5" />
+                              Donor Found
+                            </button>
+                          )}
+                          {canCompleteBloodRequest(req.status) && (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setCompleteTarget({
+                                  request: req,
+                                  initialDonorId: req.fulfilled_by_donor_id,
+                                })
+                              }
+                              className="inline-flex items-center gap-1 rounded-lg bg-[#C62828] px-3 py-1.5 text-xs font-semibold text-white hover:bg-[#B71C1C]"
+                            >
+                              <CheckCircle2 className="h-3.5 w-3.5" />
+                              Donation Complete
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => setCancelTargetId(req.id)}
+                            className="rounded-lg border border-red-200 px-3 py-1.5 text-xs font-semibold text-[#C62828] hover:bg-red-50 dark:border-red-900/60 dark:text-red-400"
+                          >
+                            Cancel Request
+                          </button>
+                        </>
+                      )}
+                    </div>
                   </div>
                 ))}
               </div>
@@ -857,11 +912,40 @@ export function StudentDashboard() {
         )}
       </div>
 
+      <InterestedMembersModal
+        open={Boolean(interestedTarget)}
+        request={interestedTarget}
+        canManage
+        onClose={() => setInterestedTarget(null)}
+        onDonorSelected={(donorId) => {
+          if (!interestedTarget) return;
+          setInterestedTarget((prev) =>
+            prev ? { ...prev, status: 'donor_found', fulfilled_by_donor_id: donorId } : null
+          );
+          loadWorkspace();
+        }}
+        onProceedToComplete={(donorId) => {
+          if (!interestedTarget) return;
+          setCompleteTarget({
+            request: interestedTarget,
+            initialDonorId: donorId ?? interestedTarget.fulfilled_by_donor_id,
+          });
+        }}
+      />
+
+      <CompleteDonationModal
+        open={Boolean(completeTarget)}
+        request={completeTarget?.request || null}
+        initialDonorId={completeTarget?.initialDonorId}
+        onClose={() => setCompleteTarget(null)}
+        onCompleted={() => loadWorkspace()}
+      />
+
       <ConfirmDialog
         open={Boolean(cancelTargetId)}
         title="Cancel Blood Request?"
-        description="This will mark your blood request as cancelled and remove it from active searches."
-        confirmLabel="Cancel Request"
+        description="This will mark your blood request as cancelled and remove it from active searches. No donation history record will be created."
+        confirmLabel="Confirm Cancel Request"
         destructive
         onConfirm={handleCancelRequest}
         onCancel={() => setCancelTargetId(null)}

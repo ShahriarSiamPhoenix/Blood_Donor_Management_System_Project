@@ -47,7 +47,7 @@ export function CreateBloodRequestPage() {
 
     setSubmitting(true);
     try {
-      await createBloodRequest({
+      const created = await createBloodRequest({
         requesterId: user.id,
         requesterName: form.requesterName,
         requesterRelation: form.requesterRelation,
@@ -65,11 +65,11 @@ export function CreateBloodRequestPage() {
       });
 
       showToast(
-        'Blood Request Submitted',
+        'Blood Request Published',
         'success',
-        'Your request is Pending moderator verification and visible in your Dashboard.'
+        'Your request is now live on the Blood Requests page so campus donors can respond.'
       );
-      navigate('/dashboard');
+      navigate(`/requests?requestId=${encodeURIComponent(created.id)}`);
     } catch (err) {
       showToast(
         'Submission Failed',
@@ -85,14 +85,14 @@ export function CreateBloodRequestPage() {
     <div className="mx-auto max-w-3xl px-4 py-10 sm:px-6">
       <div>
         <p className="text-sm font-semibold text-[#C62828] dark:text-red-400">
-          Emergency & Planned Support
+          Community Blood Support
         </p>
         <h1 className="font-display mt-1 text-3xl font-extrabold tracking-tight text-slate-900 dark:text-white">
           Submit a Blood Donation Request
         </h1>
         <p className="mt-2 text-sm text-slate-600 dark:text-slate-400">
-          All requests undergo moderator verification to prevent spam and duplicate entries before
-          being published to campus donors.
+          Requests are published immediately to the Blood Requests feed so registered donors can
+          express interest, and you manage donor selection and completion directly.
         </p>
       </div>
 

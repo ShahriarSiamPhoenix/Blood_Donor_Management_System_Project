@@ -12,6 +12,8 @@ export type RequestStatus =
   | 'cancelled'
   | 'expired';
 
+export type InterestStatus = 'interested' | 'selected' | 'withdrawn' | 'completed';
+
 export type ContactRequestStatus = 'pending' | 'accepted' | 'declined' | 'closed';
 
 export type ReportStatus = 'open' | 'reviewing' | 'resolved' | 'dismissed';
@@ -24,7 +26,10 @@ export type NotificationType =
   | 'donation_completed'
   | 'verification_approved'
   | 'verification_rejected'
-  | 'announcement';
+  | 'announcement'
+  | 'donor_interest'
+  | 'donor_selected'
+  | 'interest_withdrawn';
 
 export interface Department {
   id: string;
@@ -115,6 +120,7 @@ export interface BloodRequest {
   verified_by: string | null;
   verified_at: string | null;
   fulfilled_by_donor_id?: string | null;
+  interested_count?: number;
   created_at: string;
   updated_at: string;
 }
@@ -134,7 +140,38 @@ export interface PublicBloodRequest {
   is_emergency: boolean;
   status: RequestStatus;
   created_at: string;
+  requester_name?: string;
+  is_owner?: boolean;
+  interested_count?: number;
+  viewer_interest_status?: InterestStatus | null;
+  fulfilled_by_donor_id?: string | null;
+  fulfilled_donor_name?: string | null;
+  verified_at?: string | null;
   total_count: number;
+}
+
+export interface BloodRequestInterest {
+  interest_id: string;
+  blood_request_id: string;
+  donor_id: string;
+  full_name: string;
+  avatar_url: string | null;
+  blood_group: BloodGroup;
+  department_name: string;
+  department_code: string;
+  batch: string;
+  location: string;
+  last_donation_date: string | null;
+  total_donations: number;
+  is_available: boolean;
+  verification_status: VerificationStatus;
+  contact_preference: 'in_app' | 'phone_on_approval';
+  contact_phone: string | null;
+  contact_request_status: ContactRequestStatus | null;
+  share_contact: boolean;
+  message: string | null;
+  status: InterestStatus;
+  created_at: string;
 }
 
 export interface DonationHistory {

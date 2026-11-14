@@ -103,9 +103,27 @@ export async function fetchModeratorWorkspace(): Promise<{
     throw new Error(firstError.message || 'Unable to load moderator workspace data.');
   }
 
+  const rawRequests = (reqRes.data as BloodRequest[]) || [];
+  let enrichedRequests = rawRequests;
+  if (rawRequests.length > 0) {
+    const { data: interestRows } = await client
+      .from('blood_request_interests')
+      .select('blood_request_id')
+      .in('blood_request_id', rawRequests.map((r) => r.id))
+      .in('status', ['interested', 'selected', 'completed']);
+
+    if (interestRows) {
+      const counts: Record<string, number> = {};
+      for (const row of interestRows as Array<{ blood_request_id: string }>) {
+        counts[row.blood_request_id] = (counts[row.blood_request_id] || 0) + 1;
+      }
+      enrichedRequests = rawRequests.map((r) => ({ ...r, interested_count: counts[r.id] ?? 0 }));
+    }
+  }
+
   return {
     verifications: (verRes.data as unknown as VerificationRequest[]) || [],
-    requests: (reqRes.data as BloodRequest[]) || [],
+    requests: enrichedRequests,
     reports: (repRes.data as ReportItem[]) || [],
     logs: (logRes.data as unknown as AdminLogItem[]) || [],
   };
@@ -154,6 +172,18 @@ export async function moderateBloodRequestStatus(
     error = retry.error;
   }
 
+  if (error) {
+    throw new Error(formatRequestStatusError(error));
+  }
+}
+
+export async function staffRemoveBloodRequest(requestId: string, reason?: string) {
+  const client = assertSupabase();
+  await assertDatabaseRole(['moderator', 'super_admin']);
+  const { error } = await client.rpc('staff_remove_blood_request', {
+    p_request_id: requestId,
+    p_reason: reason?.trim() || null,
+  });
   if (error) {
     throw new Error(formatRequestStatusError(error));
   }
@@ -241,9 +271,27 @@ export async function fetchSuperAdminDashboardData() {
     donor_details: Array.isArray(u.donor_details) ? u.donor_details[0] ?? null : u.donor_details,
   }));
 
+  const rawRequests = (requestsRes.data as BloodRequest[]) || [];
+  let enrichedRequests = rawRequests;
+  if (rawRequests.length > 0) {
+    const { data: interestRows } = await client
+      .from('blood_request_interests')
+      .select('blood_request_id')
+      .in('blood_request_id', rawRequests.map((r) => r.id))
+      .in('status', ['interested', 'selected', 'completed']);
+
+    if (interestRows) {
+      const counts: Record<string, number> = {};
+      for (const row of interestRows as Array<{ blood_request_id: string }>) {
+        counts[row.blood_request_id] = (counts[row.blood_request_id] || 0) + 1;
+      }
+      enrichedRequests = rawRequests.map((r) => ({ ...r, interested_count: counts[r.id] ?? 0 }));
+    }
+  }
+
   return {
     users,
-    requests: (requestsRes.data as BloodRequest[]) || [],
+    requests: enrichedRequests,
     donations: (donationsRes.data as DonationHistory[]) || [],
     departments: (departmentsRes.data as Department[]) || [],
     verifications: (verificationsRes.data as unknown as VerificationRequest[]) || [],

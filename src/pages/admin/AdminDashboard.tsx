@@ -13,7 +13,9 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
-import { Clock, Plus, ShieldCheck } from 'lucide-react';
+import { Clock, Plus, ShieldCheck, Trash2, Users } from 'lucide-react';
+import { ConfirmDialog } from '../../components/common/ConfirmDialog';
+import { InterestedMembersModal } from '../../components/requests/InterestedMembersModal';
 import { useAuth } from '../../contexts/AuthContext';
 import { useToast } from '../../contexts/ToastContext';
 import {
@@ -28,6 +30,7 @@ import {
   moderateBloodRequestStatus,
   resolveReport,
   reviewVerificationRequest,
+  staffRemoveBloodRequest,
   type AdminUserRow,
 } from '../../services/adminService';
 import type {
@@ -99,6 +102,9 @@ export function AdminDashboard() {
   const [busyRequestIds, setBusyRequestIds] = useState<Record<string, boolean>>({});
   const [recordingDonation, setRecordingDonation] = useState(false);
   const [expiringRequests, setExpiringRequests] = useState(false);
+  const [interestedTarget, setInterestedTarget] = useState<BloodRequest | null>(null);
+  const [removeTarget, setRemoveTarget] = useState<BloodRequest | null>(null);
+  const [removingRequest, setRemovingRequest] = useState(false);
 
   const loadAll = useCallback(
     async (silent = false) => {
@@ -149,7 +155,9 @@ export function AdminDashboard() {
     const availableDonors = verifiedDonors.filter(
       (u) => u.donor_details?.is_available && u.donor_details?.is_publicly_discoverable
     );
-    const activeRequests = requests.filter((r) => r.status === 'verified' || r.status === 'donor_found');
+    const activeRequests = requests.filter(
+      (r) => r.status === 'pending' || r.status === 'verified' || r.status === 'donor_found'
+    );
     const completedDonations = countUniqueCompletedDonations(requests, donations);
 
     const bloodGroupData = BLOOD_GROUPS.map((bg) => ({
@@ -330,7 +338,9 @@ export function AdminDashboard() {
 
     setBusyRequestIds((prev) => ({ ...prev, [requestId]: true }));
     const selectedDonorId =
-      nextStatus === 'completed' ? completionDonorMap[requestId] || null : null;
+      nextStatus === 'completed'
+        ? completionDonorMap[requestId] || currentRequest?.fulfilled_by_donor_id || null
+        : null;
     try {
       await moderateBloodRequestStatus(requestId, nextStatus, undefined, selectedDonorId);
       const nowIso = new Date().toISOString();
@@ -399,6 +409,25 @@ export function AdminDashboard() {
         'error',
         err instanceof Error ? err.message : 'Unable to resolve report.'
       );
+    }
+  };
+
+  const handleRemoveRequest = async () => {
+    if (!removeTarget || removingRequest) return;
+    setRemovingRequest(true);
+    try {
+      await staffRemoveBloodRequest(removeTarget.id, 'Removed via Super Admin oversight panel.');
+      showToast('Request Removed', 'info', 'The blood request was removed and logged.');
+      setRemoveTarget(null);
+      await loadAll(true);
+    } catch (err) {
+      showToast(
+        'Removal Failed',
+        'error',
+        err instanceof Error ? err.message : 'Unable to remove blood request.'
+      );
+    } finally {
+      setRemovingRequest(false);
     }
   };
 
@@ -729,6 +758,14 @@ export function AdminDashboard() {
                       </p>
                     </div>
                     <div className="flex flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setInterestedTarget(r)}
+                        className="inline-flex items-center gap-1 rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200"
+                      >
+                        <Users className="h-3.5 w-3.5 text-[#C62828]" />
+                        Interested ({r.interested_count ?? 0})
+                      </button>
                       {r.status === 'pending' && (
                         <button
                           type="button"
@@ -744,7 +781,7 @@ export function AdminDashboard() {
                           <select
                             aria-label={`Donor for ${r.patient_name}`}
                             disabled={isBusy}
-                            value={completionDonorMap[r.id] || ''}
+                            value={completionDonorMap[r.id] || r.fulfilled_by_donor_id || ''}
                             onChange={(e) =>
                               setCompletionDonorMap((prev) => ({
                                 ...prev,
@@ -776,6 +813,17 @@ export function AdminDashboard() {
                         <span className="inline-flex items-center rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-950/40 dark:text-emerald-300">
                           Completed
                         </span>
+                      )}
+                      {r.status !== 'completed' && (
+                        <button
+                          type="button"
+                          disabled={isBusy}
+                          onClick={() => setRemoveTarget(r)}
+                          className="inline-flex items-center gap-1 rounded-lg border border-red-200 px-2.5 py-1.5 text-xs font-semibold text-[#C62828] hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-red-900/60 dark:text-red-400"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                          Remove
+                        </button>
                       )}
                     </div>
                   </div>
@@ -1075,6 +1123,32 @@ export function AdminDashboard() {
           </div>
         )}
       </div>
+
+      <InterestedMembersModal
+        open={Boolean(interestedTarget)}
+        request={interestedTarget}
+        canManage
+        onClose={() => setInterestedTarget(null)}
+        onDonorSelected={(donorId) => {
+          if (!interestedTarget) return;
+          setCompletionDonorMap((prev) => ({ ...prev, [interestedTarget.id]: donorId }));
+          setInterestedTarget((prev) =>
+            prev ? { ...prev, status: 'donor_found', fulfilled_by_donor_id: donorId } : null
+          );
+          loadAll(true);
+        }}
+      />
+
+      <ConfirmDialog
+        open={Boolean(removeTarget)}
+        title="Remove Blood Request?"
+        description="This permanently removes an inappropriate or duplicate non-completed request from public listings and notifies the requester. Completed donation records are never deleted."
+        confirmLabel="Remove Request"
+        destructive
+        loading={removingRequest}
+        onConfirm={handleRemoveRequest}
+        onCancel={() => setRemoveTarget(null)}
+      />
     </div>
   );
 }

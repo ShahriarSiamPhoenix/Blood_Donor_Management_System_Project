@@ -34,8 +34,8 @@ const FAQS = [
     a: 'No. Public donor search results never expose phone numbers, email addresses, or Student IDs. Requesters send an in-app contact request, and you decide whether to accept and share your contact.',
   },
   {
-    q: 'How does emergency blood request verification work?',
-    a: 'Submitted blood requests enter Pending status and are reviewed by a campus moderator or administrator to confirm hospital details before being highlighted publicly.',
+    q: 'How does community blood request publishing work?',
+    a: 'Registered members can submit blood requests and have them published immediately without waiting for admin approval. Other donors express interest in-app, and the request owner selects the donor and marks the donation complete.',
   },
   {
     q: 'Does this platform guarantee transfusion compatibility or medical eligibility?',
@@ -242,7 +242,7 @@ export function HomePage() {
                 {t.sections.recentRequests}
               </h2>
               <p className="mt-1.5 text-sm text-slate-600 dark:text-slate-400">
-                Verified hospital requests submitted by students and local families.
+                Active and recently completed hospital requests posted by campus members.
               </p>
             </div>
             <div className="flex items-center gap-4">
@@ -275,11 +275,11 @@ export function HomePage() {
             ) : recentRequests.length === 0 ? (
               <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-8 text-center dark:border-slate-700 dark:bg-slate-950">
                 <p className="text-sm font-semibold text-slate-800 dark:text-slate-200">
-                  No active verified blood requests right now.
+                  No active blood requests right now.
                 </p>
                 <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">
-                  Need urgent blood at Netrokona Sadar Hospital or nearby clinics? Submit a verified
-                  request to alert matching campus donors.
+                  Need urgent blood at Netrokona Sadar Hospital or nearby clinics? Submit a request
+                  to publish it immediately for campus donors.
                 </p>
                 <Link
                   to="/requests/new"
@@ -335,7 +335,7 @@ export function HomePage() {
                         Contact: {req.contact_person}
                       </span>
                       <Link
-                        to="/requests"
+                        to={`/requests?requestId=${encodeURIComponent(req.id)}`}
                         className="font-semibold text-[#C62828] hover:underline dark:text-red-400"
                       >
                         View details
