@@ -530,7 +530,12 @@ export function HomePage() {
                   <Mail className="mt-0.5 h-4 w-4 shrink-0 text-[#C62828] dark:text-red-400" />
                   <div>
                     <p className="font-semibold text-slate-900 dark:text-white">Official Email</p>
-                    <p className="text-slate-600 dark:text-slate-400">bloodconnect@neu.ac.bd</p>
+                    <a
+                      href="mailto:siam62326@gmail.com"
+                      className="inline-block break-all text-slate-600 transition-colors hover:text-[#C62828] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C62828]/50 dark:text-slate-400 dark:hover:text-red-400"
+                    >
+                      siam62326@gmail.com
+                    </a>
                   </div>
                 </div>
                 <div className="flex items-start gap-3">

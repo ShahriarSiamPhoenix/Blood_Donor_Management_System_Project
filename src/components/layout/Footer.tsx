@@ -29,7 +29,12 @@ export function Footer() {
               </div>
               <div className="flex items-center gap-2">
                 <Mail className="h-3.5 w-3.5 shrink-0 text-[#C62828] dark:text-red-400" />
-                <span>bloodconnect@neu.ac.bd</span>
+                <a
+                  href="mailto:siam62326@gmail.com"
+                  className="break-all transition-colors hover:text-[#C62828] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#C62828]/50 dark:hover:text-red-400"
+                >
+                  siam62326@gmail.com
+                </a>
               </div>
             </div>
           </div>
