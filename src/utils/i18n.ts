@@ -1,0 +1,118 @@
+export type Language = 'en' | 'bn';
+
+export const translations = {
+  en: {
+    brandName: 'Campus Blood Connect',
+    universityName: 'Netrokona University',
+    tagline: 'Donate Blood, Save Lives.',
+    nav: {
+      home: 'Home',
+      findDonors: 'Find Donors',
+      requests: 'Requests',
+      compatibility: 'Compatibility',
+      about: 'About',
+      dashboard: 'Dashboard',
+      signIn: 'Sign In',
+      register: 'Become a Donor',
+      signOut: 'Sign Out',
+    },
+    hero: {
+      headline: 'Donate Blood, Save Lives.',
+      subheadline:
+        'The student-led voluntary blood donor network of Netrokona University, Bangladesh. Verified campus donors, privacy-first coordination, and rapid response for hospital emergencies.',
+      primaryCta: 'Find Blood Donors',
+      secondaryCta: 'Become a Donor',
+      emergencyCta: 'Emergency Blood Request',
+    },
+    stats: {
+      totalDonors: 'Registered Donors',
+      verifiedDonors: 'Verified Donors',
+      successfulDonations: 'Successful Donations',
+      activeRequests: 'Active Blood Requests',
+    },
+    sections: {
+      bloodGroupAvailability: 'Available Donors by Blood Group',
+      recentRequests: 'Recent Verified Blood Requests',
+      howItWorks: 'How Campus Blood Connect Works',
+      whyDonate: 'Why Voluntary Blood Donation Matters',
+      testimonials: 'Student Donor Voices',
+      faq: 'Frequently Asked Questions',
+      contact: 'Campus Coordination Desk',
+    },
+    donors: {
+      title: 'Find Verified Blood Donors',
+      subtitle:
+        'Only verified student donors who opted into public discovery and are currently available appear here. Private phone numbers and student IDs are never exposed.',
+      requestContact: 'Request Contact',
+      noResults: 'No verified available donors match your filters yet.',
+    },
+    common: {
+      loading: 'Loading...',
+      submit: 'Submit',
+      cancel: 'Cancel',
+      save: 'Save Changes',
+      available: 'Available',
+      unavailable: 'Unavailable',
+      verified: 'Verified',
+      pending: 'Pending Review',
+      rejected: 'Rejected',
+    },
+  },
+  bn: {
+    brandName: 'ক্যাম্পাস ব্লাড কানেক্ট',
+    universityName: 'নেত্রকোণা বিশ্ববিদ্যালয়',
+    tagline: 'রক্ত দিন, জীবন বাঁচান।',
+    nav: {
+      home: 'হোম',
+      findDonors: 'রক্তদাতা খুঁজুন',
+      requests: 'রক্তের আবেদন',
+      compatibility: 'রক্তের গ্রুপ মিল',
+      about: 'আমাদের সম্পর্কে',
+      dashboard: 'ড্যাশবোর্ড',
+      signIn: 'লগইন',
+      register: 'রক্তদাতা হোন',
+      signOut: 'লগআউট',
+    },
+    hero: {
+      headline: 'রক্ত দিন, জীবন বাঁচান।',
+      subheadline:
+        'নেত্রকোণা বিশ্ববিদ্যালয়ের শিক্ষার্থীদের স্বেচ্ছাসেবী রক্তদাতা নেটওয়ার্ক। যাচাইকৃত রক্তদাতা, গোপনীয়তা সুরক্ষা এবং জরুরি প্রয়োজনে দ্রুত সমন্বয়।',
+      primaryCta: 'রক্তদাতা খুঁজুন',
+      secondaryCta: 'রক্তদাতা হিসেবে নিবন্ধন',
+      emergencyCta: 'জরুরি রক্তের আবেদন',
+    },
+    stats: {
+      totalDonors: 'নিবন্ধিত রক্তদাতা',
+      verifiedDonors: 'যাচাইকৃত রক্তদাতা',
+      successfulDonations: 'সফল রক্তদান',
+      activeRequests: 'চলমান আবেদন',
+    },
+    sections: {
+      bloodGroupAvailability: 'রক্তের গ্রুপ অনুযায়ী উপলব্ধ দাতা',
+      recentRequests: 'সাম্প্রতিক যাচাইকৃত রক্তের আবেদন',
+      howItWorks: 'যেভাবে প্ল্যাটফর্মটি কাজ করে',
+      whyDonate: 'স্বেচ্ছায় রক্তদান কেন গুরুত্বপূর্ণ',
+      testimonials: 'শিক্ষার্থী রক্তদাতাদের অভিজ্ঞতা',
+      faq: 'সাধারণ জিজ্ঞাসা',
+      contact: 'ক্যাম্পাস সমন্বয় ডেস্ক',
+    },
+    donors: {
+      title: 'যাচাইকৃত রক্তদাতা খুঁজুন',
+      subtitle:
+        'শুধুমাত্র যাচাইকৃত ও বর্তমানে রক্তদানে সক্ষম শিক্ষার্থীরাই এখানে প্রদর্শিত হন। ব্যক্তিগত ফোন নম্বর বা স্টুডেন্ট আইডি কখনোই প্রকাশ করা হয় না।',
+      requestContact: 'যোগাযোগের অনুরোধ',
+      noResults: 'আপনার ফিল্টার অনুযায়ী এখনো কোনো যাচাইকৃত দাতা পাওয়া যায়নি।',
+    },
+    common: {
+      loading: 'লোড হচ্ছে...',
+      submit: 'জমা দিন',
+      cancel: 'বাতিল',
+      save: 'সংরক্ষণ করুন',
+      available: 'উপলব্ধ',
+      unavailable: 'অনুপলব্ধ',
+      verified: 'যাচাইকৃত',
+      pending: 'পর্যালোচনাধীন',
+      rejected: 'প্রত্যাখ্যাত',
+    },
+  },
+} as const;
