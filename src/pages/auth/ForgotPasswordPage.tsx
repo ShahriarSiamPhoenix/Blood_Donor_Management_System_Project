@@ -12,6 +12,7 @@ export function ForgotPasswordPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (loading) return;
     setError(null);
     if (!email.trim()) {
       setError('Please enter your registered university email.');

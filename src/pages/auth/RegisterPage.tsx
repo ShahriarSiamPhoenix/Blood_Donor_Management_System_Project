@@ -62,6 +62,7 @@ export function RegisterPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (submitting) return;
     setServerError(null);
 
     const validationErrors = validateRegistrationForm({

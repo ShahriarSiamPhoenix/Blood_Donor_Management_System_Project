@@ -2,6 +2,7 @@ import React, { createContext, useCallback, useContext, useEffect, useState } fr
 import type { Session, User } from '@supabase/supabase-js';
 import { getAuthRedirectUrl, isSupabaseConfigured, supabase } from '../lib/supabase';
 import type { BloodGroup, DonorDetails, Profile } from '../types/database';
+import { formatAuthErrorMessage } from '../utils/authErrors';
 
 interface SignUpPayload {
   email: string;
@@ -101,7 +102,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       email: email.trim(),
       password,
     });
-    return { error: error ? error.message : null };
+    return { error: formatAuthErrorMessage(error) };
   };
 
   const signUp = async (payload: SignUpPayload) => {
@@ -129,7 +130,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     });
 
     if (error) {
-      return { error: error.message, needsEmailConfirmation: false };
+      return { error: formatAuthErrorMessage(error), needsEmailConfirmation: false };
     }
 
     return {
@@ -154,7 +155,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
       redirectTo: getAuthRedirectUrl('/reset-password'),
     });
-    return { error: error ? error.message : null };
+    return { error: formatAuthErrorMessage(error) };
   };
 
   const updatePassword = async (newPassword: string) => {
@@ -162,7 +163,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       return { error: 'Supabase is not configured.' };
     }
     const { error } = await supabase.auth.updateUser({ password: newPassword });
-    return { error: error ? error.message : null };
+    return { error: formatAuthErrorMessage(error) };
   };
 
   return (

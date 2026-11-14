@@ -21,7 +21,6 @@ import {
 } from '../../services/publicService';
 import type { PublicBloodRequest, PublicPlatformStats, TestimonialItem } from '../../types/database';
 import { BLOOD_GROUPS } from '../../utils/bloodCompatibility';
-import campusCourtyardImg from '../../assets/images/campus_courtyard_morning_1794561248875.jpg';
 import donorCareImg from '../../assets/images/about_donor_care_1794561232149.jpg';
 
 const FAQS = [
@@ -125,8 +124,8 @@ export function HomePage() {
               <div className="h-full min-h-64 overflow-hidden rounded-2xl border border-slate-200 bg-slate-100 dark:border-slate-800 dark:bg-slate-800">
                 {!heroImgFailed ? (
                   <img
-                    src={campusCourtyardImg}
-                    alt="Netrokona University campus courtyard in morning daylight"
+                    src="/assets/aistudio/Sunset_Reflections_at_TSC_Campus_eee489ad.png"
+                    alt="Netrokona University campus reflected in water at sunset"
                     referrerPolicy="no-referrer"
                     onError={() => setHeroImgFailed(true)}
                     className="h-full w-full object-cover lg:min-h-[380px]"
